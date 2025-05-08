@@ -31,14 +31,12 @@ typedef struct {
 TableString		g_strs[StrID_NUMTYPES] = {
 	StrID_NONE,						"",
 	StrID_Name,						"LiteGlow",
-	StrID_Description,				"An empty (skeletal, if you will) effect sample,\r for your modifying pleasure.\rCopyright 2007-2023 Adobe Inc.",
-	StrID_Gain_Param_Name,			"Gain",
-	StrID_Color_Param_Name,			"Color",
+	StrID_Description,				"A realistic diffuse glow effect.\rCopyright 2007-2025.",
+	StrID_Strength_Param_Name,		"Strength",
 };
 
 
-char	*GetStringPtr(int strNum)
+char* GetStringPtr(int strNum)
 {
 	return g_strs[strNum].str;
 }
-	
