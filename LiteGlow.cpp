@@ -23,6 +23,7 @@
 
     An enhanced glow effect with true Gaussian blur, advanced edge detection,
     and improved color handling for creating realistic luminescence effects.
+    Optimized with multi-frame rendering support and preview downsampling.
 
     Revision History
 
@@ -30,6 +31,7 @@
     =======		======													========	======
     1.0			First implementation										Dev         5/8/2025
     1.1         Enhanced with true Gaussian blur and edge detection      Dev         5/9/2025
+    1.2         Added multi-frame rendering and performance optimizations Dev         5/10/2025
 
 */
 
@@ -39,6 +41,9 @@
 // Constants for Gaussian kernel generation
 #define PI 3.14159265358979323846
 #define KERNEL_SIZE_MAX 64
+
+// Our sequence data counter
+static A_long gSequenceCount = 0;
 
 static PF_Err
 About(
@@ -65,15 +70,23 @@ GlobalSetup(
     PF_ParamDef* params[],
     PF_LayerDef* output)
 {
+    PF_Err err = PF_Err_NONE;
+
     out_data->my_version = PF_VERSION(MAJOR_VERSION,
         MINOR_VERSION,
         BUG_VERSION,
         STAGE_VERSION,
         BUILD_VERSION);
 
-    out_data->out_flags = PF_OutFlag_DEEP_COLOR_AWARE;	// 16bpc support
+    // Set up flags for optimizations
+    out_data->out_flags = PF_OutFlag_DEEP_COLOR_AWARE;  // 16bpc support
+    out_data->out_flags |= PF_OutFlag_PIX_INDEPENDENT;  // Enable parallel processing
+    out_data->out_flags |= PF_OutFlag_SEND_UPDATE_PARAMS_UI; // Update UI during processing
 
-    return PF_Err_NONE;
+    // Enable Multi-Frame Rendering support if available
+    out_data->out_flags2 = PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
+
+    return err;
 }
 
 static PF_Err
@@ -83,7 +96,7 @@ ParamsSetup(
     PF_ParamDef* params[],
     PF_LayerDef* output)
 {
-    PF_Err		err = PF_Err_NONE;
+    PF_Err err = PF_Err_NONE;
     PF_ParamDef	def;
 
     AEFX_CLR_STRUCT(def);
@@ -135,6 +148,90 @@ ParamsSetup(
         QUALITY_DISK_ID);
 
     out_data->num_params = LITEGLOW_NUM_PARAMS;
+
+    return err;
+}
+
+// Sequence data setup and teardown for multi-frame rendering
+static PF_Err
+SequenceSetup(
+    PF_InData* in_data,
+    PF_OutData* out_data,
+    PF_ParamDef* params[],
+    PF_LayerDef* output)
+{
+    PF_Err err = PF_Err_NONE;
+    AEGP_SuiteHandler suites(in_data->pica_basicP);
+
+    // Create handle for sequence data
+    PF_Handle sequenceDataH = suites.HandleSuite1()->host_new_handle(sizeof(LiteGlowSequenceData));
+
+    if (!sequenceDataH) {
+        return PF_Err_OUT_OF_MEMORY;
+    }
+
+    // Get pointer to sequence data
+    LiteGlowSequenceData* sequenceData = (LiteGlowSequenceData*)suites.HandleSuite1()->host_lock_handle(sequenceDataH);
+    if (!sequenceData) {
+        suites.HandleSuite1()->host_dispose_handle(sequenceDataH);
+        return PF_Err_OUT_OF_MEMORY;
+    }
+
+    // Initialize sequence data
+    A_long id = ++gSequenceCount;
+    sequenceData->sequence_id = id;
+    sequenceData->gaussKernelSize = 0;
+    sequenceData->kernelRadius = 0;
+    sequenceData->quality = QUALITY_MEDIUM;
+
+    // Unlock the handle
+    suites.HandleSuite1()->host_unlock_handle(sequenceDataH);
+
+    // Store handle in sequence data
+    out_data->sequence_data = sequenceDataH;
+
+    return err;
+}
+
+static PF_Err
+SequenceResetup(
+    PF_InData* in_data,
+    PF_OutData* out_data,
+    PF_ParamDef* params[],
+    PF_LayerDef* output)
+{
+    PF_Err err = PF_Err_NONE;
+
+    // Nothing specific needed here as our sequence data is simple
+    return err;
+}
+
+static PF_Err
+SequenceFlatten(
+    PF_InData* in_data,
+    PF_OutData* out_data,
+    PF_ParamDef* params[],
+    PF_LayerDef* output)
+{
+    PF_Err err = PF_Err_NONE;
+    // No special flattening needed, our data structure is simple
+    return err;
+}
+
+static PF_Err
+SequenceSetdown(
+    PF_InData* in_data,
+    PF_OutData* out_data,
+    PF_ParamDef* params[],
+    PF_LayerDef* output)
+{
+    PF_Err err = PF_Err_NONE;
+    AEGP_SuiteHandler suites(in_data->pica_basicP);
+
+    if (in_data->sequence_data) {
+        suites.HandleSuite1()->host_dispose_handle(in_data->sequence_data);
+        out_data->sequence_data = NULL;
+    }
 
     return err;
 }
@@ -265,14 +362,31 @@ ExtractBrightAreas8(
     GlowDataP gdata = reinterpret_cast<GlowDataP>(refcon);
     float strength = gdata->strength / 1000.0f; // Normalize strength
     float threshold = gdata->threshold / 255.0f;
+    float resolution_factor = gdata->resolution_factor;
 
     PF_EffectWorld* input = gdata->input;
 
     // Get perceived brightness
     float perceivedBrightness = PerceivedBrightness8(inP) / 255.0f;
 
-    // Detect edges using Sobel for additional glow emphasis
-    float edgeStrength = EdgeStrength8(input, xL, yL) / 255.0f;
+    // For preview modes, simplify edge detection based on resolution factor
+    float edgeStrength = 0.0f;
+    if (resolution_factor > 0.5f) {
+        // Full quality edge detection for high-res rendering
+        edgeStrength = EdgeStrength8(input, xL, yL) / 255.0f;
+    }
+    else {
+        // Simplified edge detection for preview - just use brightness contrast
+        float leftBrightness = PerceivedBrightness8(GetPixel8(input, xL - 1, yL)) / 255.0f;
+        float rightBrightness = PerceivedBrightness8(GetPixel8(input, xL + 1, yL)) / 255.0f;
+        float topBrightness = PerceivedBrightness8(GetPixel8(input, xL, yL - 1)) / 255.0f;
+        float bottomBrightness = PerceivedBrightness8(GetPixel8(input, xL, yL + 1)) / 255.0f;
+
+        float dx = (rightBrightness - leftBrightness) * 0.5f;
+        float dy = (bottomBrightness - topBrightness) * 0.5f;
+
+        edgeStrength = sqrtf(dx * dx + dy * dy) * 2.0f; // Scale up to match full Sobel
+    }
 
     // Combine brightness and edge detection
     float intensity = MAX(perceivedBrightness, edgeStrength * 0.5f);
@@ -326,14 +440,31 @@ ExtractBrightAreas16(
     GlowDataP gdata = reinterpret_cast<GlowDataP>(refcon);
     float strength = gdata->strength / 1000.0f; // Normalize strength
     float threshold = gdata->threshold / 255.0f;
+    float resolution_factor = gdata->resolution_factor;
 
     PF_EffectWorld* input = gdata->input;
 
     // Get perceived brightness
     float perceivedBrightness = PerceivedBrightness16(inP) / 32768.0f;
 
-    // Detect edges using Sobel for additional glow emphasis
-    float edgeStrength = EdgeStrength16(input, xL, yL) / 32768.0f;
+    // For preview modes, simplify edge detection based on resolution factor
+    float edgeStrength = 0.0f;
+    if (resolution_factor > 0.5f) {
+        // Full quality edge detection for high-res rendering
+        edgeStrength = EdgeStrength16(input, xL, yL) / 32768.0f;
+    }
+    else {
+        // Simplified edge detection for preview - just use brightness contrast
+        float leftBrightness = PerceivedBrightness16(GetPixel16(input, xL - 1, yL)) / 32768.0f;
+        float rightBrightness = PerceivedBrightness16(GetPixel16(input, xL + 1, yL)) / 32768.0f;
+        float topBrightness = PerceivedBrightness16(GetPixel16(input, xL, yL - 1)) / 32768.0f;
+        float bottomBrightness = PerceivedBrightness16(GetPixel16(input, xL, yL + 1)) / 32768.0f;
+
+        float dx = (rightBrightness - leftBrightness) * 0.5f;
+        float dy = (bottomBrightness - topBrightness) * 0.5f;
+
+        edgeStrength = sqrtf(dx * dx + dy * dy) * 2.0f; // Scale up to match full Sobel
+    }
 
     // Combine brightness and edge detection
     float intensity = MAX(perceivedBrightness, edgeStrength * 0.5f);
@@ -615,11 +746,12 @@ Render(
     PF_Err err = PF_Err_NONE;
     AEGP_SuiteHandler suites(in_data->pica_basicP);
     A_long linesL = output->height;
+    PF_LayerDef* inputP = &params[LITEGLOW_INPUT]->u.ld;
 
     // If strength is zero (or near zero), just copy the input to output
     float strength = params[LITEGLOW_STRENGTH]->u.fs_d.value;
     if (strength <= 0.1f) {
-        err = PF_COPY(&params[LITEGLOW_INPUT]->u.ld, output, NULL, NULL);
+        err = PF_COPY(inputP, output, NULL, NULL);
         return err;
     }
 
@@ -627,6 +759,18 @@ Render(
     float radius_param = params[LITEGLOW_RADIUS]->u.fs_d.value;
     float threshold = params[LITEGLOW_THRESHOLD]->u.fs_d.value;
     int quality = params[LITEGLOW_QUALITY]->u.pd.value;
+
+    // Handle downsampling for preview
+    float downscale_x = static_cast<float>(in_data->downsample_x.den) / static_cast<float>(in_data->downsample_x.num);
+    float downscale_y = static_cast<float>(in_data->downsample_y.den) / static_cast<float>(in_data->downsample_y.num);
+    float resolution_factor = MIN(downscale_x, downscale_y);
+
+    // Adjust radius based on downsampling
+    float adjusted_radius = radius_param;
+    if (resolution_factor < 0.9f) {
+        // Scale down the radius for previews to improve performance
+        adjusted_radius = radius_param * MAX(0.5f, resolution_factor);
+    }
 
     // Create temporary buffers for processing
     PF_EffectWorld bright_world, blur_h_world, blur_v_world;
@@ -655,52 +799,80 @@ Render(
         GlowData gdata;
         gdata.strength = strength;
         gdata.threshold = threshold;
-        gdata.input = &params[LITEGLOW_INPUT]->u.ld;
+        gdata.input = inputP;
+        gdata.resolution_factor = resolution_factor;
 
         // STEP 1: Extract bright areas with edge detection
         if (PF_WORLD_IS_DEEP(output)) {
             ERR(suites.Iterate16Suite2()->iterate(in_data,
-                0,                            // progress base
-                linesL,                       // progress final
-                &params[LITEGLOW_INPUT]->u.ld, // src 
-                NULL,                         // area - null for all pixels
-                (void*)&gdata,                // refcon with parameters
-                ExtractBrightAreas16,         // pixel function
-                &bright_world));              // destination
+                0,                // progress base
+                linesL,           // progress final
+                inputP,           // src 
+                NULL,             // area - null for all pixels
+                (void*)&gdata,    // refcon with parameters
+                ExtractBrightAreas16, // pixel function
+                &bright_world));  // destination
         }
         else {
             ERR(suites.Iterate8Suite2()->iterate(in_data,
-                0,                            // progress base
-                linesL,                       // progress final
-                &params[LITEGLOW_INPUT]->u.ld, // src 
-                NULL,                         // area - null for all pixels
-                (void*)&gdata,                // refcon with parameters
-                ExtractBrightAreas8,          // pixel function
-                &bright_world));              // destination
+                0,                // progress base
+                linesL,           // progress final
+                inputP,           // src 
+                NULL,             // area - null for all pixels
+                (void*)&gdata,    // refcon with parameters
+                ExtractBrightAreas8,  // pixel function
+                &bright_world));  // destination
         }
 
         if (!err) {
             // Calculate blur parameters based on quality setting
             float sigma;
-            int kernel_radius;
-            float kernel[KERNEL_SIZE_MAX * 2 + 1]; // Static array instead of std::vector
-
-            // Adjust sigma based on quality and radius parameter
             switch (quality) {
             case QUALITY_LOW:
-                sigma = radius_param * 0.5f;
+                sigma = adjusted_radius * 0.5f;
                 break;
             case QUALITY_MEDIUM:
-                sigma = radius_param * 0.75f;
+                sigma = adjusted_radius * 0.75f;
                 break;
             case QUALITY_HIGH:
             default:
-                sigma = radius_param;
+                sigma = adjusted_radius;
                 break;
             }
 
-            // Generate Gaussian kernel
-            GenerateGaussianKernel(sigma, kernel, &kernel_radius);
+            // Generate Gaussian kernel or use cached one if available
+            int kernel_radius;
+            float kernel[KERNEL_SIZE_MAX * 2 + 1]; // Static array instead of std::vector
+
+            // Check if we can use a cached kernel from sequence data
+            LiteGlowSequenceData* seq_data = NULL;
+            if (in_data->sequence_data) {
+                seq_data = (LiteGlowSequenceData*)suites.HandleSuite1()->host_lock_handle(in_data->sequence_data);
+            }
+
+            if (seq_data && seq_data->gaussKernelSize > 0 &&
+                fabsf(sigma - seq_data->sigma) < 0.01f) {
+                // Use cached kernel
+                kernel_radius = seq_data->kernelRadius;
+                memcpy(kernel, seq_data->gaussKernel, seq_data->gaussKernelSize * sizeof(float));
+            }
+            else {
+                // Generate new kernel
+                GenerateGaussianKernel(sigma, kernel, &kernel_radius);
+
+                // Cache the kernel if we have sequence data
+                if (seq_data) {
+                    seq_data->kernelRadius = kernel_radius;
+                    seq_data->sigma = sigma;
+                    seq_data->gaussKernelSize = 2 * kernel_radius + 1;
+                    memcpy(seq_data->gaussKernel, kernel, seq_data->gaussKernelSize * sizeof(float));
+                }
+            }
+
+            // Unlock sequence data if we locked it
+            if (seq_data) {
+                suites.HandleSuite1()->host_unlock_handle(in_data->sequence_data);
+            }
 
             // Create blur data with kernel
             BlurData bdata;
@@ -756,8 +928,8 @@ Render(
                         &blur_v_world)); // destination
                 }
 
-                // For high quality, apply a second blur pass
-                if (quality == QUALITY_HIGH && !err && strength > 500.0f) {
+                // For high quality, apply a second blur pass (when not in preview mode)
+                if (quality == QUALITY_HIGH && !err && strength > 500.0f && resolution_factor > 0.9f) {
                     // Second horizontal blur
                     bdata.input = &blur_v_world;
 
@@ -817,23 +989,23 @@ Render(
 
                     if (PF_WORLD_IS_DEEP(output)) {
                         ERR(suites.Iterate16Suite2()->iterate(in_data,
-                            0,                            // progress base
-                            linesL,                       // progress final
-                            &params[LITEGLOW_INPUT]->u.ld, // src (original)
-                            NULL,                         // area - null for all pixels
-                            (void*)&blend_data,           // refcon - blend parameters
-                            BlendGlow16,                  // pixel function
-                            output));                     // destination
+                            0,               // progress base
+                            linesL,          // progress final
+                            inputP,          // src (original)
+                            NULL,            // area - null for all pixels
+                            (void*)&blend_data, // refcon - blend parameters
+                            BlendGlow16,     // pixel function
+                            output));        // destination
                     }
                     else {
                         ERR(suites.Iterate8Suite2()->iterate(in_data,
-                            0,                            // progress base
-                            linesL,                       // progress final
-                            &params[LITEGLOW_INPUT]->u.ld, // src (original)
-                            NULL,                         // area - null for all pixels
-                            (void*)&blend_data,           // refcon - blend parameters
-                            BlendGlow8,                   // pixel function
-                            output));                     // destination
+                            0,               // progress base
+                            linesL,          // progress final
+                            inputP,          // src (original)
+                            NULL,            // area - null for all pixels
+                            (void*)&blend_data, // refcon - blend parameters
+                            BlendGlow8,      // pixel function
+                            output));        // destination
                     }
                 }
             }
@@ -847,7 +1019,6 @@ Render(
 
     return err;
 }
-
 
 extern "C" DllExport
 PF_Err PluginDataEntryFunction2(
@@ -887,31 +1058,38 @@ EffectMain(
     try {
         switch (cmd) {
         case PF_Cmd_ABOUT:
-            err = About(in_data,
-                out_data,
-                params,
-                output);
+            err = About(in_data, out_data, params, output);
             break;
 
         case PF_Cmd_GLOBAL_SETUP:
-            err = GlobalSetup(in_data,
-                out_data,
-                params,
-                output);
+            err = GlobalSetup(in_data, out_data, params, output);
             break;
 
         case PF_Cmd_PARAMS_SETUP:
-            err = ParamsSetup(in_data,
-                out_data,
-                params,
-                output);
+            err = ParamsSetup(in_data, out_data, params, output);
+            break;
+
+        case PF_Cmd_SEQUENCE_SETUP:
+            err = SequenceSetup(in_data, out_data, params, output);
+            break;
+
+        case PF_Cmd_SEQUENCE_RESETUP:
+            err = SequenceResetup(in_data, out_data, params, output);
+            break;
+
+        case PF_Cmd_SEQUENCE_FLATTEN:
+            err = SequenceFlatten(in_data, out_data, params, output);
+            break;
+
+        case PF_Cmd_SEQUENCE_SETDOWN:
+            err = SequenceSetdown(in_data, out_data, params, output);
             break;
 
         case PF_Cmd_RENDER:
-            err = Render(in_data,
-                out_data,
-                params,
-                output);
+            err = Render(in_data, out_data, params, output);
+            break;
+
+        default:
             break;
         }
     }

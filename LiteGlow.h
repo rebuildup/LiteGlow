@@ -36,7 +36,7 @@ typedef unsigned short PixelType;
 
 /* Versioning information */
 #define    MAJOR_VERSION    1
-#define    MINOR_VERSION    1
+#define    MINOR_VERSION    2
 #define    BUG_VERSION      0
 #define    STAGE_VERSION    PF_Stage_DEVELOP
 #define    BUILD_VERSION    1
@@ -61,6 +61,9 @@ typedef unsigned short PixelType;
 #define    QUALITY_NUM_CHOICES 3
 #define    QUALITY_DFLT       QUALITY_MEDIUM
 
+/* Maximum kernel size for Gaussian blur */
+#define    KERNEL_SIZE_MAX    64
+
 enum {
     LITEGLOW_INPUT = 0,
     LITEGLOW_STRENGTH,
@@ -77,11 +80,22 @@ enum {
     QUALITY_DISK_ID
 };
 
+// Sequence data for caching information between renders
+typedef struct {
+    A_long sequence_id;      // Unique ID for this sequence
+    float gaussKernel[KERNEL_SIZE_MAX * 2 + 1]; // Cached Gaussian kernel
+    int gaussKernelSize;     // Size of kernel
+    int kernelRadius;        // Radius of kernel
+    float sigma;             // Sigma value used for kernel
+    int quality;             // Quality setting
+} LiteGlowSequenceData;
+
 // Structure for glow parameters
 typedef struct {
     float strength;          // Glow strength
     float threshold;         // Brightness threshold
     PF_EffectWorldPtr input; // Input image for reference
+    float resolution_factor; // Downsampling factor
 } GlowData, * GlowDataP;
 
 // Structure for blur parameters
