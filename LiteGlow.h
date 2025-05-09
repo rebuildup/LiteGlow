@@ -36,23 +36,28 @@ typedef unsigned short PixelType;
 
 /* Versioning information */
 #define MAJOR_VERSION    1
-#define MINOR_VERSION    0
-#define BUG_VERSION      0  // Bug fix version
-#define STAGE_VERSION    PF_Stage_DEVELOP  // DEVELOP, ALPHA, BETA, or RELEASE
-#define BUILD_VERSION    1  // Build number
+#define MINOR_VERSION    4   // Updated version number to reflect changes
+#define BUG_VERSION      0
+#define STAGE_VERSION    PF_Stage_DEVELOP
+#define BUILD_VERSION    1
 
 /* Parameter defaults and limits */
 #define    STRENGTH_MIN       0
-#define    STRENGTH_MAX       3000   // Increased to 3000 as requested
-#define    STRENGTH_DFLT      800    // Default value
+#define    STRENGTH_MAX       5000   // Increased from 3000 to 5000
+#define    STRENGTH_DFLT      800
 
 #define    RADIUS_MIN         1
-#define    RADIUS_MAX         50
+#define    RADIUS_MAX         200    // Increased from 50 to 200
 #define    RADIUS_DFLT        10
 
 #define    THRESHOLD_MIN      0
 #define    THRESHOLD_MAX      255
 #define    THRESHOLD_DFLT     80
+
+/* New blend ratio parameter for overlay method */
+#define    BLEND_MIN          0
+#define    BLEND_MAX          100
+#define    BLEND_DFLT         100
 
 /* Quality settings */
 #define    QUALITY_LOW        1
@@ -62,7 +67,7 @@ typedef unsigned short PixelType;
 #define    QUALITY_DFLT       QUALITY_MEDIUM
 
 /* Maximum kernel size for Gaussian blur */
-#define    KERNEL_SIZE_MAX    64
+#define    KERNEL_SIZE_MAX    128  // Increased from 64 to 128
 
 enum {
     LITEGLOW_INPUT = 0,
@@ -70,6 +75,7 @@ enum {
     LITEGLOW_RADIUS,
     LITEGLOW_THRESHOLD,
     LITEGLOW_QUALITY,
+    LITEGLOW_BLEND,        // Add the new blend parameter
     LITEGLOW_NUM_PARAMS
 };
 
@@ -77,7 +83,8 @@ enum {
     STRENGTH_DISK_ID = 1,
     RADIUS_DISK_ID,
     THRESHOLD_DISK_ID,
-    QUALITY_DISK_ID
+    QUALITY_DISK_ID,
+    BLEND_DISK_ID          // Add the new disk ID
 };
 
 // Sequence data for caching information between renders
@@ -105,10 +112,12 @@ typedef struct {
     float* kernel;              // Gaussian kernel
 } BlurData, * BlurDataP;
 
-// Structure for blend parameters
+// Structure for blend parameters - updated to include blend ratio
 typedef struct {
-    PF_EffectWorldPtr glow;     // Blurred glow image
-    int quality;                // Quality setting
+    PF_EffectWorldPtr glow;       // Blurred glow image
+    PF_EffectWorldPtr original;   // Original image for overlay method
+    int quality;                  // Quality setting
+    float blend_ratio;            // Blend ratio for glow overlay (0-100%)
 } BlendData, * BlendDataP;
 
 extern "C" {

@@ -34,6 +34,7 @@ TableString		g_strs[StrID_NUMTYPES] = {
 	StrID_Radius_Param_Name,		"Radius",
 	StrID_Threshold_Param_Name,		"Threshold",
 	StrID_Quality_Param_Name,		"Quality",
+	StrID_Blend_Param_Name,         "Blend Ratio",
 	StrID_Quality_Param_Choices,	"Low|Medium|High"
 };
 

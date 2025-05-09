@@ -29,6 +29,7 @@ typedef enum {
 	StrID_Radius_Param_Name,
 	StrID_Threshold_Param_Name,
 	StrID_Quality_Param_Name,
+	StrID_Blend_Param_Name,
 	StrID_Quality_Param_Choices,
 	StrID_NUMTYPES
 } StrIDType;
