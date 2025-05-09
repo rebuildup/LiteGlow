@@ -3,7 +3,7 @@
 /*                      ADOBE CONFIDENTIAL                         */
 /*                   _ _ _ _ _ _ _ _ _ _ _ _ _                     */
 /*                                                                 */
-/* Copyright 2007-2023 Adobe Inc.                                  */
+/* Copyright 2007-2025 Adobe Inc.                                  */
 /* All Rights Reserved.                                            */
 /*                                                                 */
 /* NOTICE:  All information contained herein is, and remains the   */
@@ -21,17 +21,24 @@
 
 /*	LiteGlow.cpp
 
-    An optimized glow effect with full color support and edge diffusion.
+    An enhanced glow effect with true Gaussian blur, advanced edge detection,
+    and improved color handling for creating realistic luminescence effects.
 
     Revision History
 
     Version		Change													Engineer	Date
     =======		======													========	======
-    1.0			First implementation										yourName	5/8/2025
+    1.0			First implementation										Dev         5/8/2025
+    1.1         Enhanced with true Gaussian blur and edge detection      Dev         5/9/2025
 
 */
 
 #include "LiteGlow.h"
+#include <math.h>
+
+// Constants for Gaussian kernel generation
+#define PI 3.14159265358979323846
+#define KERNEL_SIZE_MAX 64
 
 static PF_Err
 About(
@@ -93,12 +100,46 @@ ParamsSetup(
         0,
         STRENGTH_DISK_ID);
 
+    // Add Radius slider for blur radius control
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX(STR(StrID_Radius_Param_Name),
+        RADIUS_MIN,
+        RADIUS_MAX,
+        RADIUS_MIN,
+        RADIUS_MAX,
+        RADIUS_DFLT,
+        PF_Precision_INTEGER,
+        0,
+        0,
+        RADIUS_DISK_ID);
+
+    // Add Threshold slider to control which areas glow
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX(STR(StrID_Threshold_Param_Name),
+        THRESHOLD_MIN,
+        THRESHOLD_MAX,
+        THRESHOLD_MIN,
+        THRESHOLD_MAX,
+        THRESHOLD_DFLT,
+        PF_Precision_INTEGER,
+        0,
+        0,
+        THRESHOLD_DISK_ID);
+
+    // Add Quality popup for different quality levels
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUP(STR(StrID_Quality_Param_Name),
+        QUALITY_NUM_CHOICES,
+        QUALITY_DFLT,
+        STR(StrID_Quality_Param_Choices),
+        QUALITY_DISK_ID);
+
     out_data->num_params = LITEGLOW_NUM_PARAMS;
 
     return err;
 }
 
-// Get pixel from buffer with boundary checking
+// Get pixel from buffer with boundary checking - 8-bit version
 inline PF_Pixel8* GetPixel8(PF_EffectWorld* world, int x, int y) {
     // Clamp coordinates to valid range
     x = MAX(0, MIN(x, world->width - 1));
@@ -108,6 +149,7 @@ inline PF_Pixel8* GetPixel8(PF_EffectWorld* world, int x, int y) {
     return (PF_Pixel8*)((char*)world->data + y * world->rowbytes + x * sizeof(PF_Pixel8));
 }
 
+// Get pixel from buffer with boundary checking - 16-bit version
 inline PF_Pixel16* GetPixel16(PF_EffectWorld* world, int x, int y) {
     // Clamp coordinates to valid range
     x = MAX(0, MIN(x, world->width - 1));
@@ -117,343 +159,448 @@ inline PF_Pixel16* GetPixel16(PF_EffectWorld* world, int x, int y) {
     return (PF_Pixel16*)((char*)world->data + y * world->rowbytes + x * sizeof(PF_Pixel16));
 }
 
-// Calculate perceptual luminance - much better than average for color perception
-inline float PerceivedBrightness8(PF_Pixel8* p) {
-    // Human perception weights: R=0.299, G=0.587, B=0.114
-    return (0.299f * p->red + 0.587f * p->green + 0.114f * p->blue);
+// Calculate perceptual luminance with more accurate coefficients - 8-bit
+inline float PerceivedBrightness8(const PF_Pixel8* p) {
+    // sRGB luminance factors for more accurate perceptual brightness
+    return (0.2126f * p->red + 0.7152f * p->green + 0.0722f * p->blue);
 }
 
-inline float PerceivedBrightness16(PF_Pixel16* p) {
-    // Human perception weights: R=0.299, G=0.587, B=0.114
-    return (0.299f * p->red + 0.587f * p->green + 0.114f * p->blue);
+// Calculate perceptual luminance with more accurate coefficients - 16-bit
+inline float PerceivedBrightness16(const PF_Pixel16* p) {
+    // sRGB luminance factors for more accurate perceptual brightness
+    return (0.2126f * p->red + 0.7152f * p->green + 0.0722f * p->blue);
 }
 
-// Return the maximum RGB component to respect saturated colors
-inline A_u_char MaxRGB8(PF_Pixel8* p) {
-    return MAX(p->red, MAX(p->green, p->blue));
+// Calculate edge strength using Sobel operators - 8-bit
+inline float EdgeStrength8(PF_EffectWorld* world, int x, int y) {
+    const int sobel_x[3][3] = {
+        {-1, 0, 1},
+        {-2, 0, 2},
+        {-1, 0, 1}
+    };
+
+    const int sobel_y[3][3] = {
+        {-1, -2, -1},
+        {0, 0, 0},
+        {1, 2, 1}
+    };
+
+    float gx = 0.0f, gy = 0.0f;
+
+    // Apply Sobel operators
+    for (int j = -1; j <= 1; j++) {
+        for (int i = -1; i <= 1; i++) {
+            PF_Pixel8* p = GetPixel8(world, x + i, y + j);
+            float brightness = PerceivedBrightness8(p);
+
+            gx += brightness * sobel_x[j + 1][i + 1];
+            gy += brightness * sobel_y[j + 1][i + 1];
+        }
+    }
+
+    // Calculate gradient magnitude
+    return sqrt(gx * gx + gy * gy);
 }
 
-inline A_u_short MaxRGB16(PF_Pixel16* p) {
-    return MAX(p->red, MAX(p->green, p->blue));
+// Calculate edge strength using Sobel operators - 16-bit
+inline float EdgeStrength16(PF_EffectWorld* world, int x, int y) {
+    const int sobel_x[3][3] = {
+        {-1, 0, 1},
+        {-2, 0, 2},
+        {-1, 0, 1}
+    };
+
+    const int sobel_y[3][3] = {
+        {-1, -2, -1},
+        {0, 0, 0},
+        {1, 2, 1}
+    };
+
+    float gx = 0.0f, gy = 0.0f;
+
+    // Apply Sobel operators
+    for (int j = -1; j <= 1; j++) {
+        for (int i = -1; i <= 1; i++) {
+            PF_Pixel16* p = GetPixel16(world, x + i, y + j);
+            float brightness = PerceivedBrightness16(p);
+
+            gx += brightness * sobel_x[j + 1][i + 1];
+            gy += brightness * sobel_y[j + 1][i + 1];
+        }
+    }
+
+    // Calculate gradient magnitude
+    return sqrt(gx * gx + gy * gy);
 }
 
-// Extract bright areas for glow - 8-bit
+// Generate 1D Gaussian kernel
+void GenerateGaussianKernel(float sigma, float* kernel, int* radius) {
+    // Calculate radius based on sigma (3*sigma covers 99.7% of the distribution)
+    *radius = MIN(KERNEL_SIZE_MAX / 2, (int)(3.0f * sigma + 0.5f));
+
+    float sum = 0.0f;
+
+    // Fill kernel with Gaussian values
+    for (int i = -(*radius); i <= (*radius); i++) {
+        float x = (float)i;
+        kernel[i + (*radius)] = exp(-(x * x) / (2.0f * sigma * sigma));
+        sum += kernel[i + (*radius)];
+    }
+
+    // Normalize kernel
+    for (int i = 0; i < 2 * (*radius) + 1; i++) {
+        kernel[i] /= sum;
+    }
+}
+
+// Extract bright areas with edge enhancement - 8-bit
 static PF_Err
-ExtractBright8(
+ExtractBrightAreas8(
     void* refcon,
-    A_long		xL,
-    A_long		yL,
+    A_long xL,
+    A_long yL,
     PF_Pixel8* inP,
     PF_Pixel8* outP)
 {
     GlowDataP gdata = reinterpret_cast<GlowDataP>(refcon);
     float strength = gdata->strength / 1000.0f; // Normalize strength
+    float threshold = gdata->threshold / 255.0f;
 
-    // Calculate both perceptual brightness and max RGB
-    float perceivedBrightness = PerceivedBrightness8(inP);
-    A_u_char maxRGB = MaxRGB8(inP);
+    PF_EffectWorld* input = gdata->input;
 
-    // Combine both metrics for better color handling
-    // This ensures saturated colors are properly detected
-    float brightness = MAX(perceivedBrightness, maxRGB);
+    // Get perceived brightness
+    float perceivedBrightness = PerceivedBrightness8(inP) / 255.0f;
 
-    // Lower threshold to capture more color
-    if (brightness > 80) { // Reduced from 128 to capture more color
-        // Use a smooth falloff instead of hard cutoff
-        float intensity = (brightness - 80.0f) / 175.0f;
-        intensity = MIN(1.0f, intensity) * strength;
+    // Detect edges using Sobel for additional glow emphasis
+    float edgeStrength = EdgeStrength8(input, xL, yL) / 255.0f;
 
-        // Preserve original color by scaling
-        outP->red = (A_u_char)(inP->red * intensity);
-        outP->green = (A_u_char)(inP->green * intensity);
-        outP->blue = (A_u_char)(inP->blue * intensity);
-        outP->alpha = inP->alpha;
+    // Combine brightness and edge detection
+    float intensity = MAX(perceivedBrightness, edgeStrength * 0.5f);
+
+    // Apply threshold with smooth falloff
+    float threshold_falloff = 0.1f;
+    float glow_amount = 0.0f;
+
+    if (intensity > threshold) {
+        // Smooth falloff rather than hard cutoff
+        glow_amount = MIN(1.0f, (intensity - threshold) / threshold_falloff);
+        glow_amount = glow_amount * strength;
+
+        // Apply curve for more pleasing glow falloff
+        glow_amount = powf(glow_amount, 0.8f);
+
+        // Preserve original colors
+        outP->red = (A_u_char)MIN(255.0f, inP->red * glow_amount);
+        outP->green = (A_u_char)MIN(255.0f, inP->green * glow_amount);
+        outP->blue = (A_u_char)MIN(255.0f, inP->blue * glow_amount);
+
+        // Boost highly saturated colors
+        float max_component = MAX(MAX(outP->red, outP->green), outP->blue);
+        if (max_component > 0) {
+            float saturation_boost = 1.2f;
+            outP->red = (A_u_char)MIN(255.0f, outP->red * saturation_boost);
+            outP->green = (A_u_char)MIN(255.0f, outP->green * saturation_boost);
+            outP->blue = (A_u_char)MIN(255.0f, outP->blue * saturation_boost);
+        }
     }
     else {
         // Dark areas don't contribute to glow
         outP->red = outP->green = outP->blue = 0;
-        outP->alpha = inP->alpha;
     }
+
+    // Keep original alpha
+    outP->alpha = inP->alpha;
 
     return PF_Err_NONE;
 }
 
-// Extract bright areas for glow - 16-bit
+// Extract bright areas with edge enhancement - 16-bit
 static PF_Err
-ExtractBright16(
+ExtractBrightAreas16(
     void* refcon,
-    A_long		xL,
-    A_long		yL,
+    A_long xL,
+    A_long yL,
     PF_Pixel16* inP,
     PF_Pixel16* outP)
 {
     GlowDataP gdata = reinterpret_cast<GlowDataP>(refcon);
     float strength = gdata->strength / 1000.0f; // Normalize strength
+    float threshold = gdata->threshold / 255.0f;
 
-    // Calculate both perceptual brightness and max RGB
-    float perceivedBrightness = PerceivedBrightness16(inP);
-    A_u_short maxRGB = MaxRGB16(inP);
+    PF_EffectWorld* input = gdata->input;
 
-    // Combine both metrics for better color handling
-    // This ensures saturated colors are properly detected
-    float brightness = MAX(perceivedBrightness, maxRGB);
+    // Get perceived brightness
+    float perceivedBrightness = PerceivedBrightness16(inP) / 32768.0f;
 
-    // Lower threshold to capture more color
-    float threshold = 10000.0f; // Lower threshold for 16-bit
-    if (brightness > threshold) {
-        // Use a smooth falloff instead of hard cutoff
-        float intensity = (brightness - threshold) / (32768.0f - threshold);
-        intensity = MIN(1.0f, intensity) * strength;
+    // Detect edges using Sobel for additional glow emphasis
+    float edgeStrength = EdgeStrength16(input, xL, yL) / 32768.0f;
 
-        // Preserve original color by scaling
-        outP->red = (A_u_short)(inP->red * intensity);
-        outP->green = (A_u_short)(inP->green * intensity);
-        outP->blue = (A_u_short)(inP->blue * intensity);
-        outP->alpha = inP->alpha;
+    // Combine brightness and edge detection
+    float intensity = MAX(perceivedBrightness, edgeStrength * 0.5f);
+
+    // Apply threshold with smooth falloff
+    float threshold_falloff = 0.1f;
+    float glow_amount = 0.0f;
+
+    if (intensity > threshold) {
+        // Smooth falloff rather than hard cutoff
+        glow_amount = MIN(1.0f, (intensity - threshold) / threshold_falloff);
+        glow_amount = glow_amount * strength;
+
+        // Apply curve for more pleasing glow falloff
+        glow_amount = powf(glow_amount, 0.8f);
+
+        // Preserve original colors
+        outP->red = (A_u_short)MIN(32768.0f, inP->red * glow_amount);
+        outP->green = (A_u_short)MIN(32768.0f, inP->green * glow_amount);
+        outP->blue = (A_u_short)MIN(32768.0f, inP->blue * glow_amount);
+
+        // Boost highly saturated colors
+        float max_component = MAX(MAX(outP->red, outP->green), outP->blue);
+        if (max_component > 0) {
+            float saturation_boost = 1.2f;
+            outP->red = (A_u_short)MIN(32768.0f, outP->red * saturation_boost);
+            outP->green = (A_u_short)MIN(32768.0f, outP->green * saturation_boost);
+            outP->blue = (A_u_short)MIN(32768.0f, outP->blue * saturation_boost);
+        }
     }
     else {
         // Dark areas don't contribute to glow
         outP->red = outP->green = outP->blue = 0;
-        outP->alpha = inP->alpha;
     }
+
+    // Keep original alpha
+    outP->alpha = inP->alpha;
 
     return PF_Err_NONE;
 }
 
-// Fast horizontal blur for 8-bit
+// Gaussian blur horizontal pass - 8-bit
 static PF_Err
-FastHBlur8(
+GaussianBlurH8(
     void* refcon,
-    A_long		xL,
-    A_long		yL,
+    A_long xL,
+    A_long yL,
     PF_Pixel8* inP,
     PF_Pixel8* outP)
 {
     BlurDataP bdata = reinterpret_cast<BlurDataP>(refcon);
     PF_EffectWorld* input = bdata->input;
+    float* kernel = bdata->kernel;
     int radius = bdata->radius;
 
-    A_long sumR = 0, sumG = 0, sumB = 0;
-    float weight_sum = 0.0f;
+    float r = 0.0f, g = 0.0f, b = 0.0f;
 
-    // Fast horizontal sampling with distance falloff
+    // Apply horizontal convolution with pre-computed kernel
     for (int i = -radius; i <= radius; i++) {
-        // Calculate weight based on distance (approximated Gaussian)
-        float weight = (radius - abs(i) + 1.0f) / (radius + 1.0f);
-        weight_sum += weight;
+        PF_Pixel8* src = GetPixel8(input, xL + i, yL);
+        float weight = kernel[i + radius];
 
-        PF_Pixel8* sample = GetPixel8(input, xL + i, yL);
-        sumR += (A_long)(sample->red * weight);
-        sumG += (A_long)(sample->green * weight);
-        sumB += (A_long)(sample->blue * weight);
+        r += src->red * weight;
+        g += src->green * weight;
+        b += src->blue * weight;
     }
 
-    // Average the result
-    if (weight_sum > 0.0f) {
-        outP->red = (A_u_char)(sumR / weight_sum);
-        outP->green = (A_u_char)(sumG / weight_sum);
-        outP->blue = (A_u_char)(sumB / weight_sum);
-    }
-    else {
-        outP->red = inP->red;
-        outP->green = inP->green;
-        outP->blue = inP->blue;
-    }
+    // Write blurred result
+    outP->red = (A_u_char)MIN(255.0f, MAX(0.0f, r));
+    outP->green = (A_u_char)MIN(255.0f, MAX(0.0f, g));
+    outP->blue = (A_u_char)MIN(255.0f, MAX(0.0f, b));
     outP->alpha = inP->alpha;
 
     return PF_Err_NONE;
 }
 
-// Fast vertical blur for 8-bit
+// Gaussian blur vertical pass - 8-bit
 static PF_Err
-FastVBlur8(
+GaussianBlurV8(
     void* refcon,
-    A_long		xL,
-    A_long		yL,
+    A_long xL,
+    A_long yL,
     PF_Pixel8* inP,
     PF_Pixel8* outP)
 {
     BlurDataP bdata = reinterpret_cast<BlurDataP>(refcon);
     PF_EffectWorld* input = bdata->input;
+    float* kernel = bdata->kernel;
     int radius = bdata->radius;
 
-    A_long sumR = 0, sumG = 0, sumB = 0;
-    float weight_sum = 0.0f;
+    float r = 0.0f, g = 0.0f, b = 0.0f;
 
-    // Fast vertical sampling with distance falloff
+    // Apply vertical convolution with pre-computed kernel
     for (int j = -radius; j <= radius; j++) {
-        // Calculate weight based on distance (approximated Gaussian)
-        float weight = (radius - abs(j) + 1.0f) / (radius + 1.0f);
-        weight_sum += weight;
+        PF_Pixel8* src = GetPixel8(input, xL, yL + j);
+        float weight = kernel[j + radius];
 
-        PF_Pixel8* sample = GetPixel8(input, xL, yL + j);
-        sumR += (A_long)(sample->red * weight);
-        sumG += (A_long)(sample->green * weight);
-        sumB += (A_long)(sample->blue * weight);
+        r += src->red * weight;
+        g += src->green * weight;
+        b += src->blue * weight;
     }
 
-    // Average the result
-    if (weight_sum > 0.0f) {
-        outP->red = (A_u_char)(sumR / weight_sum);
-        outP->green = (A_u_char)(sumG / weight_sum);
-        outP->blue = (A_u_char)(sumB / weight_sum);
-    }
-    else {
-        outP->red = inP->red;
-        outP->green = inP->green;
-        outP->blue = inP->blue;
-    }
+    // Write blurred result
+    outP->red = (A_u_char)MIN(255.0f, MAX(0.0f, r));
+    outP->green = (A_u_char)MIN(255.0f, MAX(0.0f, g));
+    outP->blue = (A_u_char)MIN(255.0f, MAX(0.0f, b));
     outP->alpha = inP->alpha;
 
     return PF_Err_NONE;
 }
 
-// Fast horizontal blur for 16-bit
+// Gaussian blur horizontal pass - 16-bit
 static PF_Err
-FastHBlur16(
+GaussianBlurH16(
     void* refcon,
-    A_long		xL,
-    A_long		yL,
+    A_long xL,
+    A_long yL,
     PF_Pixel16* inP,
     PF_Pixel16* outP)
 {
     BlurDataP bdata = reinterpret_cast<BlurDataP>(refcon);
     PF_EffectWorld* input = bdata->input;
+    float* kernel = bdata->kernel;
     int radius = bdata->radius;
 
-    A_long sumR = 0, sumG = 0, sumB = 0;
-    float weight_sum = 0.0f;
+    float r = 0.0f, g = 0.0f, b = 0.0f;
 
-    // Fast horizontal sampling with distance falloff
+    // Apply horizontal convolution with pre-computed kernel
     for (int i = -radius; i <= radius; i++) {
-        // Calculate weight based on distance (approximated Gaussian)
-        float weight = (radius - abs(i) + 1.0f) / (radius + 1.0f);
-        weight_sum += weight;
+        PF_Pixel16* src = GetPixel16(input, xL + i, yL);
+        float weight = kernel[i + radius];
 
-        PF_Pixel16* sample = GetPixel16(input, xL + i, yL);
-        sumR += (A_long)(sample->red * weight);
-        sumG += (A_long)(sample->green * weight);
-        sumB += (A_long)(sample->blue * weight);
+        r += src->red * weight;
+        g += src->green * weight;
+        b += src->blue * weight;
     }
 
-    // Average the result
-    if (weight_sum > 0.0f) {
-        outP->red = (A_u_short)(sumR / weight_sum);
-        outP->green = (A_u_short)(sumG / weight_sum);
-        outP->blue = (A_u_short)(sumB / weight_sum);
-    }
-    else {
-        outP->red = inP->red;
-        outP->green = inP->green;
-        outP->blue = inP->blue;
-    }
+    // Write blurred result
+    outP->red = (A_u_short)MIN(32768.0f, MAX(0.0f, r));
+    outP->green = (A_u_short)MIN(32768.0f, MAX(0.0f, g));
+    outP->blue = (A_u_short)MIN(32768.0f, MAX(0.0f, b));
     outP->alpha = inP->alpha;
 
     return PF_Err_NONE;
 }
 
-// Fast vertical blur for 16-bit
+// Gaussian blur vertical pass - 16-bit
 static PF_Err
-FastVBlur16(
+GaussianBlurV16(
     void* refcon,
-    A_long		xL,
-    A_long		yL,
+    A_long xL,
+    A_long yL,
     PF_Pixel16* inP,
     PF_Pixel16* outP)
 {
     BlurDataP bdata = reinterpret_cast<BlurDataP>(refcon);
     PF_EffectWorld* input = bdata->input;
+    float* kernel = bdata->kernel;
     int radius = bdata->radius;
 
-    A_long sumR = 0, sumG = 0, sumB = 0;
-    float weight_sum = 0.0f;
+    float r = 0.0f, g = 0.0f, b = 0.0f;
 
-    // Fast vertical sampling with distance falloff
+    // Apply vertical convolution with pre-computed kernel
     for (int j = -radius; j <= radius; j++) {
-        // Calculate weight based on distance (approximated Gaussian)
-        float weight = (radius - abs(j) + 1.0f) / (radius + 1.0f);
-        weight_sum += weight;
+        PF_Pixel16* src = GetPixel16(input, xL, yL + j);
+        float weight = kernel[j + radius];
 
-        PF_Pixel16* sample = GetPixel16(input, xL, yL + j);
-        sumR += (A_long)(sample->red * weight);
-        sumG += (A_long)(sample->green * weight);
-        sumB += (A_long)(sample->blue * weight);
+        r += src->red * weight;
+        g += src->green * weight;
+        b += src->blue * weight;
     }
 
-    // Average the result
-    if (weight_sum > 0.0f) {
-        outP->red = (A_u_short)(sumR / weight_sum);
-        outP->green = (A_u_short)(sumG / weight_sum);
-        outP->blue = (A_u_short)(sumB / weight_sum);
-    }
-    else {
-        outP->red = inP->red;
-        outP->green = inP->green;
-        outP->blue = inP->blue;
-    }
+    // Write blurred result
+    outP->red = (A_u_short)MIN(32768.0f, MAX(0.0f, r));
+    outP->green = (A_u_short)MIN(32768.0f, MAX(0.0f, g));
+    outP->blue = (A_u_short)MIN(32768.0f, MAX(0.0f, b));
     outP->alpha = inP->alpha;
 
     return PF_Err_NONE;
 }
 
-// Screen blend for natural glow - 8-bit
-inline void ScreenBlend8(PF_Pixel8* a, PF_Pixel8* b, PF_Pixel8* result) {
-    // Screen blend formula: 1 - (1-a) * (1-b)
-    // Simplified to: a + b - (a * b / 255)
-    result->red = MIN(PF_MAX_CHAN8, a->red + b->red - ((a->red * b->red) >> 8));
-    result->green = MIN(PF_MAX_CHAN8, a->green + b->green - ((a->green * b->green) >> 8));
-    result->blue = MIN(PF_MAX_CHAN8, a->blue + b->blue - ((a->blue * b->blue) >> 8));
-    // Keep original alpha
-    result->alpha = a->alpha;
-}
-
-// Screen blend for natural glow - 16-bit
-inline void ScreenBlend16(PF_Pixel16* a, PF_Pixel16* b, PF_Pixel16* result) {
-    // Screen blend formula: 1 - (1-a) * (1-b)
-    // Simplified to: a + b - (a * b / 65535)
-    result->red = MIN(PF_MAX_CHAN16, a->red + b->red - ((a->red * b->red) / PF_MAX_CHAN16));
-    result->green = MIN(PF_MAX_CHAN16, a->green + b->green - ((a->green * b->green) / PF_MAX_CHAN16));
-    result->blue = MIN(PF_MAX_CHAN16, a->blue + b->blue - ((a->blue * b->blue) / PF_MAX_CHAN16));
-    // Keep original alpha
-    result->alpha = a->alpha;
-}
-
-// Combine original with glow using screen blend - 8-bit
+// Advanced blend mode for glow - 8-bit
 static PF_Err
-AddGlow8(
+BlendGlow8(
     void* refcon,
-    A_long		xL,
-    A_long		yL,
+    A_long xL,
+    A_long yL,
     PF_Pixel8* inP,
     PF_Pixel8* outP)
 {
-    PF_EffectWorld* glowWorld = reinterpret_cast<PF_EffectWorld*>(refcon);
+    BlendDataP bdata = reinterpret_cast<BlendDataP>(refcon);
+    PF_EffectWorld* glowWorld = bdata->glow;
+    int quality = bdata->quality;
 
     // Get the glow value for this pixel
     PF_Pixel8* glowP = GetPixel8(glowWorld, xL, yL);
 
-    // Use screen blend for more natural glow
-    ScreenBlend8(inP, glowP, outP);
+    if (quality == QUALITY_HIGH) {
+        // Screen blend with additional highlight preservation
+        // 1 - (1-a)(1-b) formula with enhanced highlight handling
+        float rs = 1.0f - ((1.0f - inP->red / 255.0f) * (1.0f - glowP->red / 255.0f));
+        float gs = 1.0f - ((1.0f - inP->green / 255.0f) * (1.0f - glowP->green / 255.0f));
+        float bs = 1.0f - ((1.0f - inP->blue / 255.0f) * (1.0f - glowP->blue / 255.0f));
+
+        // Add highlight boost where glow is concentrated
+        float glow_intensity = (glowP->red + glowP->green + glowP->blue) / (3.0f * 255.0f);
+        float highlight_boost = 1.0f + glow_intensity * 0.2f;
+
+        // Apply final blend with highlight boost
+        outP->red = (A_u_char)MIN(255.0f, rs * 255.0f * highlight_boost);
+        outP->green = (A_u_char)MIN(255.0f, gs * 255.0f * highlight_boost);
+        outP->blue = (A_u_char)MIN(255.0f, bs * 255.0f * highlight_boost);
+    }
+    else {
+        // Standard screen blend for medium/low quality
+        outP->red = (A_u_char)MIN(255, inP->red + glowP->red - ((inP->red * glowP->red) >> 8));
+        outP->green = (A_u_char)MIN(255, inP->green + glowP->green - ((inP->green * glowP->green) >> 8));
+        outP->blue = (A_u_char)MIN(255, inP->blue + glowP->blue - ((inP->blue * glowP->blue) >> 8));
+    }
+
+    // Keep original alpha
+    outP->alpha = inP->alpha;
 
     return PF_Err_NONE;
 }
 
-// Combine original with glow using screen blend - 16-bit
+// Advanced blend mode for glow - 16-bit
 static PF_Err
-AddGlow16(
+BlendGlow16(
     void* refcon,
-    A_long		xL,
-    A_long		yL,
+    A_long xL,
+    A_long yL,
     PF_Pixel16* inP,
     PF_Pixel16* outP)
 {
-    PF_EffectWorld* glowWorld = reinterpret_cast<PF_EffectWorld*>(refcon);
+    BlendDataP bdata = reinterpret_cast<BlendDataP>(refcon);
+    PF_EffectWorld* glowWorld = bdata->glow;
+    int quality = bdata->quality;
 
     // Get the glow value for this pixel
     PF_Pixel16* glowP = GetPixel16(glowWorld, xL, yL);
 
-    // Use screen blend for more natural glow
-    ScreenBlend16(inP, glowP, outP);
+    if (quality == QUALITY_HIGH) {
+        // Screen blend with additional highlight preservation
+        // 1 - (1-a)(1-b) formula with enhanced highlight handling
+        float rs = 1.0f - ((1.0f - inP->red / 32768.0f) * (1.0f - glowP->red / 32768.0f));
+        float gs = 1.0f - ((1.0f - inP->green / 32768.0f) * (1.0f - glowP->green / 32768.0f));
+        float bs = 1.0f - ((1.0f - inP->blue / 32768.0f) * (1.0f - glowP->blue / 32768.0f));
+
+        // Add highlight boost where glow is concentrated
+        float glow_intensity = (glowP->red + glowP->green + glowP->blue) / (3.0f * 32768.0f);
+        float highlight_boost = 1.0f + glow_intensity * 0.2f;
+
+        // Apply final blend with highlight boost
+        outP->red = (A_u_short)MIN(32768.0f, rs * 32768.0f * highlight_boost);
+        outP->green = (A_u_short)MIN(32768.0f, gs * 32768.0f * highlight_boost);
+        outP->blue = (A_u_short)MIN(32768.0f, bs * 32768.0f * highlight_boost);
+    }
+    else {
+        // Standard screen blend for medium/low quality
+        outP->red = (A_u_short)MIN(32768.0f, inP->red + glowP->red - ((inP->red * glowP->red) / 32768));
+        outP->green = (A_u_short)MIN(32768.0f, inP->green + glowP->green - ((inP->green * glowP->green) / 32768));
+        outP->blue = (A_u_short)MIN(32768.0f, inP->blue + glowP->blue - ((inP->blue * glowP->blue) / 32768));
+    }
+
+    // Keep original alpha
+    outP->alpha = inP->alpha;
 
     return PF_Err_NONE;
 }
@@ -465,9 +612,9 @@ Render(
     PF_ParamDef* params[],
     PF_LayerDef* output)
 {
-    PF_Err				err = PF_Err_NONE;
-    AEGP_SuiteHandler	suites(in_data->pica_basicP);
-    A_long				linesL = output->height;
+    PF_Err err = PF_Err_NONE;
+    AEGP_SuiteHandler suites(in_data->pica_basicP);
+    A_long linesL = output->height;
 
     // If strength is zero (or near zero), just copy the input to output
     float strength = params[LITEGLOW_STRENGTH]->u.fs_d.value;
@@ -476,7 +623,12 @@ Render(
         return err;
     }
 
-    // Create worlds for processing stages
+    // Get user parameters
+    float radius_param = params[LITEGLOW_RADIUS]->u.fs_d.value;
+    float threshold = params[LITEGLOW_THRESHOLD]->u.fs_d.value;
+    int quality = params[LITEGLOW_QUALITY]->u.pd.value;
+
+    // Create temporary buffers for processing
     PF_EffectWorld bright_world, blur_h_world, blur_v_world;
 
     // Create temporary worlds
@@ -502,8 +654,10 @@ Render(
         // Create glow parameters
         GlowData gdata;
         gdata.strength = strength;
+        gdata.threshold = threshold;
+        gdata.input = &params[LITEGLOW_INPUT]->u.ld;
 
-        // STEP 1: Extract bright parts (color-aware)
+        // STEP 1: Extract bright areas with edge detection
         if (PF_WORLD_IS_DEEP(output)) {
             ERR(suites.Iterate16Suite2()->iterate(in_data,
                 0,                            // progress base
@@ -511,7 +665,7 @@ Render(
                 &params[LITEGLOW_INPUT]->u.ld, // src 
                 NULL,                         // area - null for all pixels
                 (void*)&gdata,                // refcon with parameters
-                ExtractBright16,              // pixel function
+                ExtractBrightAreas16,         // pixel function
                 &bright_world));              // destination
         }
         else {
@@ -521,21 +675,40 @@ Render(
                 &params[LITEGLOW_INPUT]->u.ld, // src 
                 NULL,                         // area - null for all pixels
                 (void*)&gdata,                // refcon with parameters
-                ExtractBright8,               // pixel function
+                ExtractBrightAreas8,          // pixel function
                 &bright_world));              // destination
         }
 
         if (!err) {
-            // Calculate blur radius based on strength - larger radius for boundary diffusion
-            int radius = 5 + (int)(strength / 200.0f);
-            radius = MIN(radius, 30); // Cap at reasonable value for performance
+            // Calculate blur parameters based on quality setting
+            float sigma;
+            int kernel_radius;
+            float kernel[KERNEL_SIZE_MAX * 2 + 1]; // Static array instead of std::vector
 
-            // Create blur data
+            // Adjust sigma based on quality and radius parameter
+            switch (quality) {
+            case QUALITY_LOW:
+                sigma = radius_param * 0.5f;
+                break;
+            case QUALITY_MEDIUM:
+                sigma = radius_param * 0.75f;
+                break;
+            case QUALITY_HIGH:
+            default:
+                sigma = radius_param;
+                break;
+            }
+
+            // Generate Gaussian kernel
+            GenerateGaussianKernel(sigma, kernel, &kernel_radius);
+
+            // Create blur data with kernel
             BlurData bdata;
             bdata.input = &bright_world;
-            bdata.radius = radius;
+            bdata.radius = kernel_radius;
+            bdata.kernel = kernel;
 
-            // STEP 2: Apply first horizontal blur pass
+            // STEP 2: Apply horizontal Gaussian blur
             if (PF_WORLD_IS_DEEP(output)) {
                 ERR(suites.Iterate16Suite2()->iterate(in_data,
                     0,                // progress base
@@ -543,7 +716,7 @@ Render(
                     &bright_world,    // src 
                     NULL,             // area - null for all pixels
                     (void*)&bdata,    // refcon with blur data
-                    FastHBlur16,      // pixel function
+                    GaussianBlurH16,  // pixel function
                     &blur_h_world));  // destination
             }
             else {
@@ -553,7 +726,7 @@ Render(
                     &bright_world,    // src 
                     NULL,             // area - null for all pixels
                     (void*)&bdata,    // refcon with blur data
-                    FastHBlur8,       // pixel function
+                    GaussianBlurH8,   // pixel function
                     &blur_h_world));  // destination
             }
 
@@ -561,7 +734,7 @@ Render(
                 // Update blur data for vertical pass
                 bdata.input = &blur_h_world;
 
-                // STEP 3: Apply first vertical blur pass
+                // STEP 3: Apply vertical Gaussian blur
                 if (PF_WORLD_IS_DEEP(output)) {
                     ERR(suites.Iterate16Suite2()->iterate(in_data,
                         0,               // progress base
@@ -569,7 +742,7 @@ Render(
                         &blur_h_world,   // src 
                         NULL,            // area - null for all pixels
                         (void*)&bdata,   // refcon with blur data
-                        FastVBlur16,     // pixel function
+                        GaussianBlurV16, // pixel function
                         &blur_v_world)); // destination
                 }
                 else {
@@ -579,16 +752,15 @@ Render(
                         &blur_h_world,   // src 
                         NULL,            // area - null for all pixels
                         (void*)&bdata,   // refcon with blur data
-                        FastVBlur8,      // pixel function
+                        GaussianBlurV8,  // pixel function
                         &blur_v_world)); // destination
                 }
 
-                // For higher strength values, apply a second blur pass for more diffusion
-                if (strength > 800.0f && !err) {
-                    // Update blur data
+                // For high quality, apply a second blur pass
+                if (quality == QUALITY_HIGH && !err && strength > 500.0f) {
+                    // Second horizontal blur
                     bdata.input = &blur_v_world;
 
-                    // Second horizontal blur
                     if (PF_WORLD_IS_DEEP(output)) {
                         ERR(suites.Iterate16Suite2()->iterate(in_data,
                             0,               // progress base
@@ -596,7 +768,7 @@ Render(
                             &blur_v_world,   // src 
                             NULL,            // area - null for all pixels
                             (void*)&bdata,   // refcon with blur data
-                            FastHBlur16,     // pixel function
+                            GaussianBlurH16, // pixel function
                             &bright_world)); // destination (reuse)
                     }
                     else {
@@ -606,7 +778,7 @@ Render(
                             &blur_v_world,   // src 
                             NULL,            // area - null for all pixels
                             (void*)&bdata,   // refcon with blur data
-                            FastHBlur8,      // pixel function
+                            GaussianBlurH8,  // pixel function
                             &bright_world)); // destination (reuse)
                     }
 
@@ -621,7 +793,7 @@ Render(
                                 &bright_world,   // src 
                                 NULL,            // area - null for all pixels
                                 (void*)&bdata,   // refcon with blur data
-                                FastVBlur16,     // pixel function
+                                GaussianBlurV16, // pixel function
                                 &blur_v_world)); // destination
                         }
                         else {
@@ -631,22 +803,26 @@ Render(
                                 &bright_world,   // src 
                                 NULL,            // area - null for all pixels
                                 (void*)&bdata,   // refcon with blur data
-                                FastVBlur8,      // pixel function
+                                GaussianBlurV8,  // pixel function
                                 &blur_v_world)); // destination
                         }
                     }
                 }
 
                 if (!err) {
-                    // STEP 4: Apply final screen blend
+                    // STEP 4: Blend original and glow
+                    BlendData blend_data;
+                    blend_data.glow = &blur_v_world;
+                    blend_data.quality = quality;
+
                     if (PF_WORLD_IS_DEEP(output)) {
                         ERR(suites.Iterate16Suite2()->iterate(in_data,
                             0,                            // progress base
                             linesL,                       // progress final
                             &params[LITEGLOW_INPUT]->u.ld, // src (original)
                             NULL,                         // area - null for all pixels
-                            (void*)&blur_v_world,         // refcon - blurred glow image
-                            AddGlow16,                    // pixel function
+                            (void*)&blend_data,           // refcon - blend parameters
+                            BlendGlow16,                  // pixel function
                             output));                     // destination
                     }
                     else {
@@ -655,8 +831,8 @@ Render(
                             linesL,                       // progress final
                             &params[LITEGLOW_INPUT]->u.ld, // src (original)
                             NULL,                         // area - null for all pixels
-                            (void*)&blur_v_world,         // refcon - blurred glow image
-                            AddGlow8,                     // pixel function
+                            (void*)&blend_data,           // refcon - blend parameters
+                            BlendGlow8,                   // pixel function
                             output));                     // destination
                     }
                 }
@@ -711,7 +887,6 @@ EffectMain(
     try {
         switch (cmd) {
         case PF_Cmd_ABOUT:
-
             err = About(in_data,
                 out_data,
                 params,
@@ -719,7 +894,6 @@ EffectMain(
             break;
 
         case PF_Cmd_GLOBAL_SETUP:
-
             err = GlobalSetup(in_data,
                 out_data,
                 params,
@@ -727,7 +901,6 @@ EffectMain(
             break;
 
         case PF_Cmd_PARAMS_SETUP:
-
             err = ParamsSetup(in_data,
                 out_data,
                 params,
@@ -735,7 +908,6 @@ EffectMain(
             break;
 
         case PF_Cmd_RENDER:
-
             err = Render(in_data,
                 out_data,
                 params,

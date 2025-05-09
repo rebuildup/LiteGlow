@@ -3,7 +3,7 @@
 /*                      ADOBE CONFIDENTIAL                         */
 /*                   _ _ _ _ _ _ _ _ _ _ _ _ _                     */
 /*                                                                 */
-/* Copyright 2007-2023 Adobe Inc.                                  */
+/* Copyright 2007-2025 Adobe Inc.                                  */
 /* All Rights Reserved.                                            */
 /*                                                                 */
 /* NOTICE:  All information contained herein is, and remains the   */
@@ -26,15 +26,16 @@ typedef struct {
 	A_char		str[256];
 } TableString;
 
-
-
 TableString		g_strs[StrID_NUMTYPES] = {
 	StrID_NONE,						"",
 	StrID_Name,						"LiteGlow",
-	StrID_Description,				"A realistic diffuse glow effect.\rCopyright 2007-2025.",
+	StrID_Description,				"An enhanced glow effect with true Gaussian blur.\rCopyright 2007-2025.",
 	StrID_Strength_Param_Name,		"Strength",
+	StrID_Radius_Param_Name,		"Radius",
+	StrID_Threshold_Param_Name,		"Threshold",
+	StrID_Quality_Param_Name,		"Quality",
+	StrID_Quality_Param_Choices,	"Low|Medium|High"
 };
-
 
 char* GetStringPtr(int strNum)
 {
