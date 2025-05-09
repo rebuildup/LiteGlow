@@ -84,6 +84,12 @@
     <ClInclude Include="..\..\..\Headers\AE_PluginData.h">
       <Filter>Headers\AE</Filter>
     </ClInclude>
+    <ClInclude Include="..\LiteGlowGPU.h">
+      <Filter>Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="..\LiteGlow_Algorithms\LiteGlowFFT.h">
+      <Filter>Headers</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\..\Util\AEGP_SuiteHandler.cpp">
@@ -94,6 +100,8 @@
     </ClCompile>
     <ClCompile Include="..\LiteGlow.cpp" />
     <ClCompile Include="..\LiteGlow_Strings.cpp" />
+    <ClCompile Include="..\LiteGlowGPU.cpp" />
+    <ClCompile Include="..\LiteGlow_Algorithms\LiteGlowFFT.cpp" />
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="..\LiteGlowPiPL.r">

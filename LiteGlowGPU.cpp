@@ -34,7 +34,7 @@
 
 */
 
-#include "LiteGlow.h"
+#include "LiteGlowGPU.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,13 +49,12 @@
 // Utility to determine if GPU acceleration is available
 static bool IsGPUAccelerationAvailable(PF_InData* in_data) {
     bool result = false;
-    AEGP_SuiteHandler suites(in_data->pica_basicP);
 
-    // Check if GPU acceleration is enabled in AE
-    const char* gpu_enabled = nullptr;
-    PF_Err err = suites.UtilitySuite8()->PF_GetEnvironmentString("AE_ENABLE_GPU", &gpu_enabled);
+    // Instead of using UtilitySuite, we can check for GPU flag in out_flags2
+    // or simply return true and let AE handle GPU availability
 
-    if (!err && gpu_enabled && strcmp(gpu_enabled, "1") == 0) {
+    // For simplicity, we'll just check if we're on a recent version of AE
+    if (in_data->version.major >= 14) { // CS6 and above
         result = true;
     }
 
@@ -242,7 +241,9 @@ SequenceSetup(
     }
 
     // Get pointer to sequence data
-    LiteGlowSequenceData* sequenceData = (LiteGlowSequenceData*)suites.HandleSuite1()->host_lock_handle(sequenceDataH);
+    PF_Handle handle = in_data->sequence_data;
+    LiteGlowSequenceData* sequenceData = handle ? reinterpret_cast<LiteGlowSequenceData*>(suites.HandleSuite1()->host_lock_handle(handle)) : nullptr;
+
     if (!sequenceData) {
         suites.HandleSuite1()->host_dispose_handle(sequenceDataH);
         return PF_Err_OUT_OF_MEMORY;
@@ -394,11 +395,17 @@ SmartPreRender(
 
         // Setup the checkout specifications
         PF_CheckoutResult checkout_result;
+        PF_RenderRequest req;
+        req.rect = expanded_rect;
+        req.field = PF_Field_FRAME;
+        req.preserve_rgb_of_zero_alpha = true;
+        req.channel_mask = PF_ChannelMask_ARGB;
+
         ERR(extra->cb->checkout_layer(
             in_data->effect_ref,
             LITEGLOW_INPUT,
             LITEGLOW_INPUT,
-            &expanded_rect,
+            &req,  // <-- Use the PF_RenderRequest structure
             in_data->current_time,
             in_data->time_step,
             in_data->time_scale,

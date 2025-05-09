@@ -29,7 +29,7 @@ typedef struct {
 TableString		g_strs[StrID_NUMTYPES] = {
 	StrID_NONE,						"",
 	StrID_Name,						"LiteGlow",
-	StrID_Description,				"An enhanced glow effect with true Gaussian blur.\rCopyright 2007-2025.",
+	StrID_Description,				"An enhanced glow effect with true Gaussian blur and resolution independence.\rCopyright 2007-2025.",
 	StrID_Strength_Param_Name,		"Strength",
 	StrID_Radius_Param_Name,		"Radius",
 	StrID_Threshold_Param_Name,		"Threshold",

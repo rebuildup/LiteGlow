@@ -355,6 +355,8 @@ cl /D "MSWindows" /EP $(IntDir)%(Filename).rrc &gt;               "$(ProjectDir)
   <ItemGroup>
     <ClInclude Include="..\..\..\Headers\AE_PluginData.h" />
     <ClInclude Include="..\LiteGlow.h" />
+    <ClInclude Include="..\LiteGlowGPU.h" />
+    <ClInclude Include="..\LiteGlow_Algorithms\LiteGlowFFT.h" />
     <ClInclude Include="..\LiteGlow_Strings.h" />
     <ClInclude Include="..\..\..\Headers\A.h" />
     <ClInclude Include="..\..\..\Headers\AE_Effect.h" />
@@ -379,6 +381,8 @@ cl /D "MSWindows" /EP $(IntDir)%(Filename).rrc &gt;               "$(ProjectDir)
     <ClCompile Include="..\..\..\Util\AEGP_SuiteHandler.cpp" />
     <ClCompile Include="..\..\..\Util\MissingSuiteError.cpp" />
     <ClCompile Include="..\LiteGlow.cpp" />
+    <ClCompile Include="..\LiteGlowGPU.cpp" />
+    <ClCompile Include="..\LiteGlow_Algorithms\LiteGlowFFT.cpp" />
     <ClCompile Include="..\LiteGlow_Strings.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
