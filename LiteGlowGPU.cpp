@@ -34,7 +34,7 @@
 
 */
 
-#include "LiteGlow.h"
+#include "LiteGlowGPU.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,52 +46,19 @@
 // Threshold for using FFT-based blur instead of separable Gaussian
 #define FFT_RADIUS_THRESHOLD 30
 
-// Define GPU resource data structure
-typedef struct GPUResourceData {
-    bool initialized;
-
-    // Simple GPU resources - implementation specific to your AE SDK version
-    void* gpuContext;
-    void* shaderPrograms[4];  // Simplified shader array
-    void* renderTargets[3];   // Simplified render targets
-
-    // Kernel data
-    float kernelData[128];
-    int kernelSize;
-} GPUResourceData;
-
-// Simple GPU render function - to be implemented based on available APIs
-static PF_Err
-GpuRender(
-    PF_InData* in_data,
-    PF_EffectWorld* input_worldP,
-    PF_EffectWorld* output_worldP,
-    float strength,
-    float radius,
-    float threshold,
-    int quality,
-    float blend_ratio)
-{
-    PF_Err err = PF_Err_NONE;
-    AEGP_SuiteHandler suites(in_data->pica_basicP);
-
-    for (int y = 0; y < output_worldP->height; y++) {
-        // Copy the row of data
-        memcpy((char*)output_worldP->data + y * output_worldP->rowbytes,
-            (char*)input_worldP->data + y * input_worldP->rowbytes,
-            input_worldP->width * sizeof(PF_Pixel));
-    }
-
-    return err;
-}
-
-// After your IsGPUAccelerationAvailable function, replace with this simplified version:
-
 // Utility to determine if GPU acceleration is available
 static bool IsGPUAccelerationAvailable(PF_InData* in_data) {
-    // Simple version check - we claim GPU support for CS6+ but
-    // we don't actually do GPU processing yet
-    return (in_data->version.major >= 14);
+    bool result = false;
+
+    // Instead of using UtilitySuite, we can check for GPU flag in out_flags2
+    // or simply return true and let AE handle GPU availability
+
+    // For simplicity, we'll just check if we're on a recent version of AE
+    if (in_data->version.major >= 14) { // CS6 and above
+        result = true;
+    }
+
+    return result;
 }
 
 static PF_Err
@@ -274,7 +241,9 @@ SequenceSetup(
     }
 
     // Get pointer to sequence data
-    LiteGlowSequenceData* sequenceData = (LiteGlowSequenceData*)suites.HandleSuite1()->host_lock_handle(sequenceDataH);
+    PF_Handle handle = in_data->sequence_data;
+    LiteGlowSequenceData* sequenceData = handle ? reinterpret_cast<LiteGlowSequenceData*>(suites.HandleSuite1()->host_lock_handle(handle)) : nullptr;
+
     if (!sequenceData) {
         suites.HandleSuite1()->host_dispose_handle(sequenceDataH);
         return PF_Err_OUT_OF_MEMORY;
@@ -373,8 +342,6 @@ HandleChangedParam(
 
     return err;
 }
-
-// For SmartFX implementation - this calculates how much of the input we need
 static PF_Err
 SmartPreRender(
     PF_InData* in_data,
@@ -398,16 +365,7 @@ SmartPreRender(
         float radius = radius_param.u.fs_d.value;
         bool usePerformanceMode = performance_param.u.bd.value;
 
-        // For SmartFX, we need to tell After Effects what part of the input layer we need
-        // to process. For a glow effect, we need a bit more of the input layer than
-        // the output area, specifically, we need to expand by the glow radius.
-
-        // Create a modified request that expands our input needs by the blur radius
-        PF_Rect expanded_rect = extra->output->pre_render_data.rect;
-
-        // Calculate the expansion amount based on radius and performance settings
-        // In high performance mode, we'll use the pyramid blur for large radii
-        // which requires less expansion
+        // Calculate expansion amount
         int expansion_amount;
         if (usePerformanceMode && radius > FFT_RADIUS_THRESHOLD) {
             // Pyramid/FFT blur requires less expansion
@@ -418,19 +376,30 @@ SmartPreRender(
             expansion_amount = (int)(radius + 0.5f);
         }
 
-        // Expand the rect in all directions
-        expanded_rect.left -= expansion_amount;
-        expanded_rect.top -= expansion_amount;
-        expanded_rect.right += expansion_amount;
-        expanded_rect.bottom += expansion_amount;
+        // Create proper render request
+        PF_RenderRequest req = { 0 };
 
-        // Setup the checkout specifications
-        PF_CheckoutResult checkout_result;
+        // Copy the output rect to our request
+        req.rect = extra->output->pre_render_data.rect;
+
+        // Expand the rect in all directions
+        req.rect.left -= expansion_amount;
+        req.rect.top -= expansion_amount;
+        req.rect.right += expansion_amount;
+        req.rect.bottom += expansion_amount;
+
+        // Set other request parameters
+        req.field = PF_Field_FRAME;
+        req.preserve_rgb_of_zero_alpha = true;
+        req.channel_mask = PF_ChannelMask_ARGB;
+
+        // Checkout the layer with expanded dimensions
+        PF_CheckoutResult checkout_result = { 0 };
         ERR(extra->cb->checkout_layer(
             in_data->effect_ref,
             LITEGLOW_INPUT,
             LITEGLOW_INPUT,
-            &expanded_rect,
+            &req,
             in_data->current_time,
             in_data->time_step,
             in_data->time_scale,
@@ -542,21 +511,21 @@ SmartRender(
                     // Use pyramid blur or FFT-based blur for very large radii
                     // This is much faster than traditional Gaussian for large radii
 
+                    // In SmartRender function
+                    // Replace the GPU code block in the SmartRender function
                     if (use_gpu) {
-                        // For now, our "GPU" implementation is just the CPU path
-                        // but we'll set it up for future expansion when GPU APIs are available
+                        // GPU acceleration is not actually implemented in this version
+                        // Just log and fall back to CPU path
+                        use_gpu = false;
 
-                        // Mark as handled by "GPU" but actually use CPU code
-                        // This is a placeholder for real GPU implementation
-                        // Just using the CPU path for now
-
-                        use_gpu = false; // Force CPU path
-
-                        // Log note about GPU fallback (if needed)
 #ifdef _DEBUG
-                        PF_SPRINTF(out_data->return_msg, "GPU acceleration requested but using CPU fallback");
+                        // You might want to log that GPU rendering was requested but not available
+                        suites.ANSICallbacksSuite1()->sprintf(out_data->return_msg,
+                            "GPU acceleration was requested but is not yet implemented - using CPU");
 #endif
                     }
+
+                    // Then the CPU code continues...
                     else {
                         // CPU-based pyramid blur implementation
                         // For large radius values, downscale, blur, upscale is faster
@@ -596,22 +565,20 @@ SmartRender(
                     }
                 }
                 else {
-                    // Use standard separable Gaussian blur for smaller radii
+                    // Replace the GPU code block in the SmartRender function
                     if (use_gpu) {
-                        // For now, our "GPU" implementation is just the CPU path
-                        // but we'll set it up for future expansion when GPU APIs are available
+                        // GPU acceleration is not actually implemented in this version
+                        // Just log and fall back to CPU path
+                        use_gpu = false;
 
-                        // Mark as handled by "GPU" but actually use CPU code
-                        // This is a placeholder for real GPU implementation
-                        // Just using the CPU path for now
-
-                        use_gpu = false; // Force CPU path
-
-                        // Log note about GPU fallback (if needed)
 #ifdef _DEBUG
-                        PF_SPRINTF(out_data->return_msg, "GPU acceleration requested but using CPU fallback");
+                        // You might want to log that GPU rendering was requested but not available
+                        suites.ANSICallbacksSuite1()->sprintf(out_data->return_msg,
+                            "GPU acceleration was requested but is not yet implemented - using CPU");
 #endif
                     }
+
+                    // Then the CPU code continues...
                     else {
                         // CPU-based separable Gaussian implementation 
                         // Generate Gaussian kernel
