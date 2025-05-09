@@ -35,7 +35,6 @@
 */
 
 #include "LiteGlowGPU.h"
-#include "LiteGlowGPU_Impl.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -342,7 +341,8 @@ HandleChangedParam(
     }
 
     return err;
-}static PF_Err
+}
+static PF_Err
 SmartPreRender(
     PF_InData* in_data,
     PF_OutData* out_data,
@@ -376,16 +376,19 @@ SmartPreRender(
             expansion_amount = (int)(radius + 0.5f);
         }
 
-        // Create request for checkout_layer
+        // Create proper render request
         PF_RenderRequest req = { 0 };
+
+        // Copy the output rect to our request
         req.rect = extra->output->pre_render_data.rect;
 
-        // Expand the rectangle
+        // Expand the rect in all directions
         req.rect.left -= expansion_amount;
         req.rect.top -= expansion_amount;
         req.rect.right += expansion_amount;
         req.rect.bottom += expansion_amount;
 
+        // Set other request parameters
         req.field = PF_Field_FRAME;
         req.preserve_rgb_of_zero_alpha = true;
         req.channel_mask = PF_ChannelMask_ARGB;
@@ -509,20 +512,16 @@ SmartRender(
                     // This is much faster than traditional Gaussian for large radii
 
                     // In SmartRender function
-                    bool use_gpu = false;
-                    if (seq_data) {
-                        use_gpu = seq_data->gpuAccelerationAvailable && usePerformanceMode;
-                    }
-
+                    // Replace the GPU code block in the SmartRender function
                     if (use_gpu) {
-                        // GPU implementation is not available in this SDK version
-                        // Fall back to CPU implementation
+                        // GPU acceleration is not actually implemented in this version
+                        // Just log and fall back to CPU path
                         use_gpu = false;
 
 #ifdef _DEBUG
-                        // Log that we're falling back to CPU
+                        // You might want to log that GPU rendering was requested but not available
                         suites.ANSICallbacksSuite1()->sprintf(out_data->return_msg,
-                            "GPU requested but not available - using CPU fallback");
+                            "GPU acceleration was requested but is not yet implemented - using CPU");
 #endif
                     }
 
@@ -566,21 +565,16 @@ SmartRender(
                     }
                 }
                 else {
-                    // In SmartRender function
-                    bool use_gpu = false;
-                    if (seq_data) {
-                        use_gpu = seq_data->gpuAccelerationAvailable && usePerformanceMode;
-                    }
-
+                    // Replace the GPU code block in the SmartRender function
                     if (use_gpu) {
-                        // GPU implementation is not available in this SDK version
-                        // Fall back to CPU implementation
+                        // GPU acceleration is not actually implemented in this version
+                        // Just log and fall back to CPU path
                         use_gpu = false;
 
 #ifdef _DEBUG
-                        // Log that we're falling back to CPU
+                        // You might want to log that GPU rendering was requested but not available
                         suites.ANSICallbacksSuite1()->sprintf(out_data->return_msg,
-                            "GPU requested but not available - using CPU fallback");
+                            "GPU acceleration was requested but is not yet implemented - using CPU");
 #endif
                     }
 

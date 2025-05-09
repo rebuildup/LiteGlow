@@ -75,25 +75,23 @@ GpuRender(
     PF_Err err = PF_Err_NONE;
     AEGP_SuiteHandler suites(in_data->pica_basicP);
 
-    // Implementation will depend on available GPU APIs in your SDK
-    // Check available suites in your SDK documentation
-
-    // Simplified approach - just copy input to output for now
-    // Replace with actual GPU implementation when API is determined
-    // Instead of:
-// suites.WorldSuite1()->copy(input_worldP, output_worldP, NULL, NULL);
-
-// Use something like:
-    PF_EffectWorld temp_world = *input_worldP;
-    temp_world.data = output_worldP->data;
+    for (int y = 0; y < output_worldP->height; y++) {
+        // Copy the row of data
+        memcpy((char*)output_worldP->data + y * output_worldP->rowbytes,
+            (char*)input_worldP->data + y * input_worldP->rowbytes,
+            input_worldP->width * sizeof(PF_Pixel));
+    }
 
     return err;
 }
 
+// After your IsGPUAccelerationAvailable function, replace with this simplified version:
+
 // Utility to determine if GPU acceleration is available
 static bool IsGPUAccelerationAvailable(PF_InData* in_data) {
-    // For now, just check version as a placeholder
-    return (in_data->version.major >= 14);  // CS6 or later
+    // Simple version check - we claim GPU support for CS6+ but
+    // we don't actually do GPU processing yet
+    return (in_data->version.major >= 14);
 }
 
 static PF_Err
