@@ -35,8 +35,8 @@ typedef unsigned short PixelType;
 #include "LiteGlow_Strings.h"
 
 /* Versioning information */
-#define MAJOR_VERSION    1  // Your major version
-#define MINOR_VERSION    0  // Your minor version
+#define MAJOR_VERSION    1
+#define MINOR_VERSION    0
 #define BUG_VERSION      0  // Bug fix version
 #define STAGE_VERSION    PF_Stage_DEVELOP  // DEVELOP, ALPHA, BETA, or RELEASE
 #define BUILD_VERSION    1  // Build number

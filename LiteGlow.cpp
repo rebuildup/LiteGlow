@@ -108,7 +108,7 @@ ParamsSetup(
         STRENGTH_MIN,
         STRENGTH_MAX,
         STRENGTH_DFLT,
-        PF_Precision_HUNDREDTHS,
+        PF_Precision_INTEGER,
         0,
         0,
         STRENGTH_DISK_ID);

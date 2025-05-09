@@ -31,18 +31,18 @@ resource 'PiPL' (16000) {
 #endif
 		/* [6] */
 		AE_PiPL_Version {
-    2,  // This is the PiPL format version, not your plugin version
-    0   // Keep this as {2, 0} in most cases
-},
+			2,
+			0
+		},
 		/* [7] */
 		AE_Effect_Spec_Version {
 			PF_PLUG_IN_VERSION,
 			PF_PLUG_IN_SUBVERS
 		},
 		/* [8] */
-				AE_Effect_Version {
-    0x00010000  // For version 1.0
-},
+		AE_Effect_Version {
+			0x00080001 /* Must match version in GlobalSetup */
+		},
 		/* [9] */
 		AE_Effect_Info_Flags {
 			0
