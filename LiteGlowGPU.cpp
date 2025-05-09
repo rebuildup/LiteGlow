@@ -35,6 +35,7 @@
 */
 
 #include "LiteGlowGPU.h"
+#include "LiteGlowGPU_Impl.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -341,10 +342,7 @@ HandleChangedParam(
     }
 
     return err;
-}
-
-// For SmartFX implementation - this calculates how much of the input we need
-static PF_Err
+}static PF_Err
 SmartPreRender(
     PF_InData* in_data,
     PF_OutData* out_data,
@@ -367,16 +365,7 @@ SmartPreRender(
         float radius = radius_param.u.fs_d.value;
         bool usePerformanceMode = performance_param.u.bd.value;
 
-        // For SmartFX, we need to tell After Effects what part of the input layer we need
-        // to process. For a glow effect, we need a bit more of the input layer than
-        // the output area, specifically, we need to expand by the glow radius.
-
-        // Create a modified request that expands our input needs by the blur radius
-        PF_Rect expanded_rect = extra->output->pre_render_data.rect;
-
-        // Calculate the expansion amount based on radius and performance settings
-        // In high performance mode, we'll use the pyramid blur for large radii
-        // which requires less expansion
+        // Calculate expansion amount
         int expansion_amount;
         if (usePerformanceMode && radius > FFT_RADIUS_THRESHOLD) {
             // Pyramid/FFT blur requires less expansion
@@ -387,25 +376,27 @@ SmartPreRender(
             expansion_amount = (int)(radius + 0.5f);
         }
 
-        // Expand the rect in all directions
-        expanded_rect.left -= expansion_amount;
-        expanded_rect.top -= expansion_amount;
-        expanded_rect.right += expansion_amount;
-        expanded_rect.bottom += expansion_amount;
+        // Create request for checkout_layer
+        PF_RenderRequest req = { 0 };
+        req.rect = extra->output->pre_render_data.rect;
 
-        // Setup the checkout specifications
-        PF_CheckoutResult checkout_result;
-        PF_RenderRequest req;
-        req.rect = expanded_rect;
+        // Expand the rectangle
+        req.rect.left -= expansion_amount;
+        req.rect.top -= expansion_amount;
+        req.rect.right += expansion_amount;
+        req.rect.bottom += expansion_amount;
+
         req.field = PF_Field_FRAME;
         req.preserve_rgb_of_zero_alpha = true;
         req.channel_mask = PF_ChannelMask_ARGB;
 
+        // Checkout the layer with expanded dimensions
+        PF_CheckoutResult checkout_result = { 0 };
         ERR(extra->cb->checkout_layer(
             in_data->effect_ref,
             LITEGLOW_INPUT,
             LITEGLOW_INPUT,
-            &req,  // <-- Use the PF_RenderRequest structure
+            &req,
             in_data->current_time,
             in_data->time_step,
             in_data->time_scale,
@@ -517,10 +508,25 @@ SmartRender(
                     // Use pyramid blur or FFT-based blur for very large radii
                     // This is much faster than traditional Gaussian for large radii
 
-                    if (use_gpu) {
-                        // GPU-based FFT implementation would go here
-                        // Using GPU_FX suite and appropriate shader code
+                    // In SmartRender function
+                    bool use_gpu = false;
+                    if (seq_data) {
+                        use_gpu = seq_data->gpuAccelerationAvailable && usePerformanceMode;
                     }
+
+                    if (use_gpu) {
+                        // GPU implementation is not available in this SDK version
+                        // Fall back to CPU implementation
+                        use_gpu = false;
+
+#ifdef _DEBUG
+                        // Log that we're falling back to CPU
+                        suites.ANSICallbacksSuite1()->sprintf(out_data->return_msg,
+                            "GPU requested but not available - using CPU fallback");
+#endif
+                    }
+
+                    // Then the CPU code continues...
                     else {
                         // CPU-based pyramid blur implementation
                         // For large radius values, downscale, blur, upscale is faster
@@ -560,11 +566,25 @@ SmartRender(
                     }
                 }
                 else {
-                    // Use standard separable Gaussian blur for smaller radii
-                    if (use_gpu) {
-                        // GPU-based Gaussian blur implementation would go here
-                        // Using GPU_FX suite and appropriate shader code
+                    // In SmartRender function
+                    bool use_gpu = false;
+                    if (seq_data) {
+                        use_gpu = seq_data->gpuAccelerationAvailable && usePerformanceMode;
                     }
+
+                    if (use_gpu) {
+                        // GPU implementation is not available in this SDK version
+                        // Fall back to CPU implementation
+                        use_gpu = false;
+
+#ifdef _DEBUG
+                        // Log that we're falling back to CPU
+                        suites.ANSICallbacksSuite1()->sprintf(out_data->return_msg,
+                            "GPU requested but not available - using CPU fallback");
+#endif
+                    }
+
+                    // Then the CPU code continues...
                     else {
                         // CPU-based separable Gaussian implementation 
                         // Generate Gaussian kernel

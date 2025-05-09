@@ -97,7 +97,7 @@ typedef struct {
     int quality;             // Quality setting
     bool gpuAccelerationAvailable; // Whether GPU acceleration is available
     bool fftInitialized;     // Whether FFT has been initialized
-    // Additional FFT/GPU-related data would go here in a real implementation
+    // No GPU-specific data for now
 } LiteGlowSequenceData;
 
 // Structure for glow parameters - updated with new fields
@@ -114,6 +114,14 @@ typedef struct {
     int radius;                 // Blur radius
     float* kernel;              // Gaussian kernel
 } BlurData, * BlurDataP;
+
+// Add this near the top of the file with other includes
+typedef struct GPUResourceData GPUResourceData;
+
+// Then in the LiteGlowSequenceData struct, add:
+void* gpuData;  // Will hold GPU resource data
+struct GPUResourceData;
+
 
 extern "C" {
 

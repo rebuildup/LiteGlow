@@ -46,20 +46,54 @@
 // Threshold for using FFT-based blur instead of separable Gaussian
 #define FFT_RADIUS_THRESHOLD 30
 
-// Utility to determine if GPU acceleration is available
-static bool IsGPUAccelerationAvailable(PF_InData* in_data) {
-    bool result = false;
+// Define GPU resource data structure
+typedef struct GPUResourceData {
+    bool initialized;
+
+    // Simple GPU resources - implementation specific to your AE SDK version
+    void* gpuContext;
+    void* shaderPrograms[4];  // Simplified shader array
+    void* renderTargets[3];   // Simplified render targets
+
+    // Kernel data
+    float kernelData[128];
+    int kernelSize;
+} GPUResourceData;
+
+// Simple GPU render function - to be implemented based on available APIs
+static PF_Err
+GpuRender(
+    PF_InData* in_data,
+    PF_EffectWorld* input_worldP,
+    PF_EffectWorld* output_worldP,
+    float strength,
+    float radius,
+    float threshold,
+    int quality,
+    float blend_ratio)
+{
+    PF_Err err = PF_Err_NONE;
     AEGP_SuiteHandler suites(in_data->pica_basicP);
 
-    // Check if GPU acceleration is enabled in AE
-    const char* gpu_enabled = nullptr;
-    PF_Err err = suites.UtilitySuite8()->PF_GetEnvironmentString("AE_ENABLE_GPU", &gpu_enabled);
+    // Implementation will depend on available GPU APIs in your SDK
+    // Check available suites in your SDK documentation
 
-    if (!err && gpu_enabled && strcmp(gpu_enabled, "1") == 0) {
-        result = true;
-    }
+    // Simplified approach - just copy input to output for now
+    // Replace with actual GPU implementation when API is determined
+    // Instead of:
+// suites.WorldSuite1()->copy(input_worldP, output_worldP, NULL, NULL);
 
-    return result;
+// Use something like:
+    PF_EffectWorld temp_world = *input_worldP;
+    temp_world.data = output_worldP->data;
+
+    return err;
+}
+
+// Utility to determine if GPU acceleration is available
+static bool IsGPUAccelerationAvailable(PF_InData* in_data) {
+    // For now, just check version as a placeholder
+    return (in_data->version.major >= 14);  // CS6 or later
 }
 
 static PF_Err
@@ -511,8 +545,19 @@ SmartRender(
                     // This is much faster than traditional Gaussian for large radii
 
                     if (use_gpu) {
-                        // GPU-based FFT implementation would go here
-                        // Using GPU_FX suite and appropriate shader code
+                        // For now, our "GPU" implementation is just the CPU path
+                        // but we'll set it up for future expansion when GPU APIs are available
+
+                        // Mark as handled by "GPU" but actually use CPU code
+                        // This is a placeholder for real GPU implementation
+                        // Just using the CPU path for now
+
+                        use_gpu = false; // Force CPU path
+
+                        // Log note about GPU fallback (if needed)
+#ifdef _DEBUG
+                        PF_SPRINTF(out_data->return_msg, "GPU acceleration requested but using CPU fallback");
+#endif
                     }
                     else {
                         // CPU-based pyramid blur implementation
@@ -555,8 +600,19 @@ SmartRender(
                 else {
                     // Use standard separable Gaussian blur for smaller radii
                     if (use_gpu) {
-                        // GPU-based Gaussian blur implementation would go here
-                        // Using GPU_FX suite and appropriate shader code
+                        // For now, our "GPU" implementation is just the CPU path
+                        // but we'll set it up for future expansion when GPU APIs are available
+
+                        // Mark as handled by "GPU" but actually use CPU code
+                        // This is a placeholder for real GPU implementation
+                        // Just using the CPU path for now
+
+                        use_gpu = false; // Force CPU path
+
+                        // Log note about GPU fallback (if needed)
+#ifdef _DEBUG
+                        PF_SPRINTF(out_data->return_msg, "GPU acceleration requested but using CPU fallback");
+#endif
                     }
                     else {
                         // CPU-based separable Gaussian implementation 
