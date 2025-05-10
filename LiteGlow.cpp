@@ -35,10 +35,8 @@
 
 */
 
-#include "LiteGlowGPU.h"
-#include "LiteGlowGPU_Impl.h"
-#include "AEGP_SuiteHandler.h"
-#include <string.h>
+#include "LiteGlow.h"
+#include <math.h>
 
 // Constants for Gaussian kernel generation
 #define PI 3.14159265358979323846
@@ -64,6 +62,7 @@ About(
         STR(StrID_Description));
     return PF_Err_NONE;
 }
+
 static PF_Err
 GlobalSetup(
     PF_InData* in_data,
@@ -86,9 +85,6 @@ GlobalSetup(
 
     // Enable Multi-Frame Rendering support if available
     out_data->out_flags2 = PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
-
-    // Add GPU rendering support flag - but the code won't actually use it
-    out_data->out_flags2 |= PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
 
     return err;
 }
@@ -155,6 +151,8 @@ ParamsSetup(
 
     return err;
 }
+
+// Sequence data setup and teardown for multi-frame rendering
 static PF_Err
 SequenceSetup(
     PF_InData* in_data,
@@ -180,14 +178,11 @@ SequenceSetup(
     }
 
     // Initialize sequence data
-    memset(sequenceData, 0, sizeof(LiteGlowSequenceData));
     A_long id = ++gSequenceCount;
     sequenceData->sequence_id = id;
     sequenceData->gaussKernelSize = 0;
     sequenceData->kernelRadius = 0;
     sequenceData->quality = QUALITY_MEDIUM;
-
-    // No GPU initialization
 
     // Unlock the handle
     suites.HandleSuite1()->host_unlock_handle(sequenceDataH);
@@ -222,6 +217,7 @@ SequenceFlatten(
     // No special flattening needed, our data structure is simple
     return err;
 }
+
 static PF_Err
 SequenceSetdown(
     PF_InData* in_data,
@@ -233,9 +229,6 @@ SequenceSetdown(
     AEGP_SuiteHandler suites(in_data->pica_basicP);
 
     if (in_data->sequence_data) {
-        // No need to check for GPU context anymore
-
-        // Dispose sequence data
         suites.HandleSuite1()->host_dispose_handle(in_data->sequence_data);
         out_data->sequence_data = NULL;
     }
@@ -761,8 +754,6 @@ Render(
         err = PF_COPY(inputP, output, NULL, NULL);
         return err;
     }
-
-    // No GPU detection - always use CPU path
 
     // Get user parameters
     float radius_param = params[LITEGLOW_RADIUS]->u.fs_d.value;

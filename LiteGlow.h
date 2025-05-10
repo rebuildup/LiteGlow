@@ -64,11 +64,6 @@ typedef unsigned short PixelType;
 /* Maximum kernel size for Gaussian blur */
 #define    KERNEL_SIZE_MAX    64
 
-struct LiteGlowGPUContext;
-
-// GPU Processing Support
-#define LITEGLOW_GPU_SUPPORTED 0
-
 enum {
     LITEGLOW_INPUT = 0,
     LITEGLOW_STRENGTH,
@@ -85,9 +80,7 @@ enum {
     QUALITY_DISK_ID
 };
 
-// Forward declaration of GPU context
-typedef struct LiteGlowGPUContext* LiteGlowGPUContextP;
-
+// Sequence data for caching information between renders
 typedef struct {
     A_long sequence_id;      // Unique ID for this sequence
     float gaussKernel[KERNEL_SIZE_MAX * 2 + 1]; // Cached Gaussian kernel
@@ -95,8 +88,6 @@ typedef struct {
     int kernelRadius;        // Radius of kernel
     float sigma;             // Sigma value used for kernel
     int quality;             // Quality setting
-
-    // No GPU context for now
 } LiteGlowSequenceData;
 
 // Structure for glow parameters
