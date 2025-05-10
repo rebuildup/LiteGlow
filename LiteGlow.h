@@ -43,7 +43,7 @@ typedef unsigned short PixelType;
 
 /* Parameter defaults and limits */
 #define    STRENGTH_MIN       0
-#define    STRENGTH_MAX       3000   // Increased to 3000 as requested
+#define    STRENGTH_MAX       10000   // Increased from 3000 to 10000
 #define    STRENGTH_DFLT      800    // Default value
 
 #define    RADIUS_MIN         1
@@ -109,6 +109,7 @@ typedef struct {
 typedef struct {
     PF_EffectWorldPtr glow;     // Blurred glow image
     int quality;                // Quality setting
+    float strength;             // Added strength parameter
 } BlendData, * BlendDataP;
 
 extern "C" {

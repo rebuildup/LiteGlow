@@ -349,8 +349,6 @@ void GenerateGaussianKernel(float sigma, float* kernel, int* radius) {
         kernel[i] /= sum;
     }
 }
-
-// Extract bright areas with edge enhancement - 8-bit
 static PF_Err
 ExtractBrightAreas8(
     void* refcon,
@@ -360,7 +358,19 @@ ExtractBrightAreas8(
     PF_Pixel8* outP)
 {
     GlowDataP gdata = reinterpret_cast<GlowDataP>(refcon);
-    float strength = gdata->strength / 1000.0f; // Normalize strength
+
+    // Modified strength handling for more powerful effect
+    float strength = 0.0f;
+    if (gdata->strength <= 3000.0f) {
+        strength = gdata->strength / 1000.0f; // Original scaling for values up to 3000
+    }
+    else {
+        // Enhanced scaling for values above 3000
+        float base = 3.0f; // Base value at 3000
+        float excess = (gdata->strength - 3000.0f) / 7000.0f; // Normalize excess portion
+        strength = base + (excess * excess * 10.0f); // Apply quadratic scaling to excess
+    }
+
     float threshold = gdata->threshold / 255.0f;
     float resolution_factor = gdata->resolution_factor;
 
@@ -388,7 +398,7 @@ ExtractBrightAreas8(
         edgeStrength = sqrtf(dx * dx + dy * dy) * 2.0f; // Scale up to match full Sobel
     }
 
-    // Combine brightness and edge detection
+    // Enhanced intensity for combined brightness and edge detection
     float intensity = MAX(perceivedBrightness, edgeStrength * 0.5f);
 
     // Apply threshold with smooth falloff
@@ -396,22 +406,26 @@ ExtractBrightAreas8(
     float glow_amount = 0.0f;
 
     if (intensity > threshold) {
-        // Smooth falloff rather than hard cutoff
+        // Modified falloff for stronger glow
         glow_amount = MIN(1.0f, (intensity - threshold) / threshold_falloff);
+
+        // Apply strength with enhanced curve for high values
+        float power_curve = (strength > 5.0f) ? 0.6f : 0.8f;
         glow_amount = glow_amount * strength;
+        glow_amount = powf(glow_amount, power_curve);
 
-        // Apply curve for more pleasing glow falloff
-        glow_amount = powf(glow_amount, 0.8f);
-
-        // Preserve original colors
+        // Preserve original colors with enhanced boost
         outP->red = (A_u_char)MIN(255.0f, inP->red * glow_amount);
         outP->green = (A_u_char)MIN(255.0f, inP->green * glow_amount);
         outP->blue = (A_u_char)MIN(255.0f, inP->blue * glow_amount);
 
-        // Boost highly saturated colors
+        // Enhanced color boost for high-intensity glows
         float max_component = MAX(MAX(outP->red, outP->green), outP->blue);
         if (max_component > 0) {
-            float saturation_boost = 1.2f;
+            // More aggressive saturation boost that scales with strength
+            float saturation_boost = 1.2f + (strength * 0.05f);
+            saturation_boost = MIN(saturation_boost, 2.5f); // Cap at 2.5x to prevent oversaturation
+
             outP->red = (A_u_char)MIN(255.0f, outP->red * saturation_boost);
             outP->green = (A_u_char)MIN(255.0f, outP->green * saturation_boost);
             outP->blue = (A_u_char)MIN(255.0f, outP->blue * saturation_boost);
@@ -428,7 +442,7 @@ ExtractBrightAreas8(
     return PF_Err_NONE;
 }
 
-// Extract bright areas with edge enhancement - 16-bit
+// Step 3: Similarly modify the ExtractBrightAreas16 function
 static PF_Err
 ExtractBrightAreas16(
     void* refcon,
@@ -438,7 +452,19 @@ ExtractBrightAreas16(
     PF_Pixel16* outP)
 {
     GlowDataP gdata = reinterpret_cast<GlowDataP>(refcon);
-    float strength = gdata->strength / 1000.0f; // Normalize strength
+
+    // Modified strength handling for more powerful effect
+    float strength = 0.0f;
+    if (gdata->strength <= 3000.0f) {
+        strength = gdata->strength / 1000.0f; // Original scaling for values up to 3000
+    }
+    else {
+        // Enhanced scaling for values above 3000
+        float base = 3.0f; // Base value at 3000
+        float excess = (gdata->strength - 3000.0f) / 7000.0f; // Normalize excess portion
+        strength = base + (excess * excess * 10.0f); // Apply quadratic scaling to excess
+    }
+
     float threshold = gdata->threshold / 255.0f;
     float resolution_factor = gdata->resolution_factor;
 
@@ -466,7 +492,7 @@ ExtractBrightAreas16(
         edgeStrength = sqrtf(dx * dx + dy * dy) * 2.0f; // Scale up to match full Sobel
     }
 
-    // Combine brightness and edge detection
+    // Enhanced intensity for combined brightness and edge detection
     float intensity = MAX(perceivedBrightness, edgeStrength * 0.5f);
 
     // Apply threshold with smooth falloff
@@ -474,22 +500,26 @@ ExtractBrightAreas16(
     float glow_amount = 0.0f;
 
     if (intensity > threshold) {
-        // Smooth falloff rather than hard cutoff
+        // Modified falloff for stronger glow
         glow_amount = MIN(1.0f, (intensity - threshold) / threshold_falloff);
+
+        // Apply strength with enhanced curve for high values
+        float power_curve = (strength > 5.0f) ? 0.6f : 0.8f;
         glow_amount = glow_amount * strength;
+        glow_amount = powf(glow_amount, power_curve);
 
-        // Apply curve for more pleasing glow falloff
-        glow_amount = powf(glow_amount, 0.8f);
-
-        // Preserve original colors
+        // Preserve original colors with enhanced boost
         outP->red = (A_u_short)MIN(32768.0f, inP->red * glow_amount);
         outP->green = (A_u_short)MIN(32768.0f, inP->green * glow_amount);
         outP->blue = (A_u_short)MIN(32768.0f, inP->blue * glow_amount);
 
-        // Boost highly saturated colors
+        // Enhanced color boost for high-intensity glows
         float max_component = MAX(MAX(outP->red, outP->green), outP->blue);
         if (max_component > 0) {
-            float saturation_boost = 1.2f;
+            // More aggressive saturation boost that scales with strength
+            float saturation_boost = 1.2f + (strength * 0.05f);
+            saturation_boost = MIN(saturation_boost, 2.5f); // Cap at 2.5x to prevent oversaturation
+
             outP->red = (A_u_short)MIN(32768.0f, outP->red * saturation_boost);
             outP->green = (A_u_short)MIN(32768.0f, outP->green * saturation_boost);
             outP->blue = (A_u_short)MIN(32768.0f, outP->blue * saturation_boost);
@@ -645,8 +675,6 @@ GaussianBlurV16(
 
     return PF_Err_NONE;
 }
-
-// Advanced blend mode for glow - 8-bit
 static PF_Err
 BlendGlow8(
     void* refcon,
@@ -658,25 +686,39 @@ BlendGlow8(
     BlendDataP bdata = reinterpret_cast<BlendDataP>(refcon);
     PF_EffectWorld* glowWorld = bdata->glow;
     int quality = bdata->quality;
+    float strength = bdata->strength; // Use the strength member we added to BlendData
 
     // Get the glow value for this pixel
     PF_Pixel8* glowP = GetPixel8(glowWorld, xL, yL);
 
-    if (quality == QUALITY_HIGH) {
+    // Enhanced blending logic
+    if (quality == QUALITY_HIGH || strength > 3000.0f) {
         // Screen blend with additional highlight preservation
-        // 1 - (1-a)(1-b) formula with enhanced highlight handling
         float rs = 1.0f - ((1.0f - inP->red / 255.0f) * (1.0f - glowP->red / 255.0f));
         float gs = 1.0f - ((1.0f - inP->green / 255.0f) * (1.0f - glowP->green / 255.0f));
         float bs = 1.0f - ((1.0f - inP->blue / 255.0f) * (1.0f - glowP->blue / 255.0f));
 
         // Add highlight boost where glow is concentrated
         float glow_intensity = (glowP->red + glowP->green + glowP->blue) / (3.0f * 255.0f);
-        float highlight_boost = 1.0f + glow_intensity * 0.2f;
+
+        // Scale highlight boost with strength (for values > 3000)
+        float highlight_factor = (strength > 3000.0f) ?
+            0.2f + ((strength - 3000.0f) / 7000.0f) * 0.4f : 0.2f;
+
+        float highlight_boost = 1.0f + glow_intensity * highlight_factor;
 
         // Apply final blend with highlight boost
         outP->red = (A_u_char)MIN(255.0f, rs * 255.0f * highlight_boost);
         outP->green = (A_u_char)MIN(255.0f, gs * 255.0f * highlight_boost);
         outP->blue = (A_u_char)MIN(255.0f, bs * 255.0f * highlight_boost);
+
+        // For extreme high strength (> 7000), add extra glow intensity boost
+        if (strength > 7000.0f) {
+            float extreme_boost = (strength - 7000.0f) / 3000.0f * 0.5f;
+            outP->red = (A_u_char)MIN(255.0f, outP->red * (1.0f + extreme_boost));
+            outP->green = (A_u_char)MIN(255.0f, outP->green * (1.0f + extreme_boost));
+            outP->blue = (A_u_char)MIN(255.0f, outP->blue * (1.0f + extreme_boost));
+        }
     }
     else {
         // Standard screen blend for medium/low quality
@@ -691,7 +733,7 @@ BlendGlow8(
     return PF_Err_NONE;
 }
 
-// Advanced blend mode for glow - 16-bit
+// Step 5: Similarly modify BlendGlow16 for 16-bit processing
 static PF_Err
 BlendGlow16(
     void* refcon,
@@ -703,25 +745,39 @@ BlendGlow16(
     BlendDataP bdata = reinterpret_cast<BlendDataP>(refcon);
     PF_EffectWorld* glowWorld = bdata->glow;
     int quality = bdata->quality;
+    float strength = bdata->strength; // Use the strength member we added to BlendData
 
     // Get the glow value for this pixel
     PF_Pixel16* glowP = GetPixel16(glowWorld, xL, yL);
 
-    if (quality == QUALITY_HIGH) {
+    // Enhanced blending logic
+    if (quality == QUALITY_HIGH || strength > 3000.0f) {
         // Screen blend with additional highlight preservation
-        // 1 - (1-a)(1-b) formula with enhanced highlight handling
         float rs = 1.0f - ((1.0f - inP->red / 32768.0f) * (1.0f - glowP->red / 32768.0f));
         float gs = 1.0f - ((1.0f - inP->green / 32768.0f) * (1.0f - glowP->green / 32768.0f));
         float bs = 1.0f - ((1.0f - inP->blue / 32768.0f) * (1.0f - glowP->blue / 32768.0f));
 
         // Add highlight boost where glow is concentrated
         float glow_intensity = (glowP->red + glowP->green + glowP->blue) / (3.0f * 32768.0f);
-        float highlight_boost = 1.0f + glow_intensity * 0.2f;
+
+        // Scale highlight boost with strength (for values > 3000)
+        float highlight_factor = (strength > 3000.0f) ?
+            0.2f + ((strength - 3000.0f) / 7000.0f) * 0.4f : 0.2f;
+
+        float highlight_boost = 1.0f + glow_intensity * highlight_factor;
 
         // Apply final blend with highlight boost
         outP->red = (A_u_short)MIN(32768.0f, rs * 32768.0f * highlight_boost);
         outP->green = (A_u_short)MIN(32768.0f, gs * 32768.0f * highlight_boost);
         outP->blue = (A_u_short)MIN(32768.0f, bs * 32768.0f * highlight_boost);
+
+        // For extreme high strength (> 7000), add extra glow intensity boost
+        if (strength > 7000.0f) {
+            float extreme_boost = (strength - 7000.0f) / 3000.0f * 0.5f;
+            outP->red = (A_u_short)MIN(32768.0f, outP->red * (1.0f + extreme_boost));
+            outP->green = (A_u_short)MIN(32768.0f, outP->green * (1.0f + extreme_boost));
+            outP->blue = (A_u_short)MIN(32768.0f, outP->blue * (1.0f + extreme_boost));
+        }
     }
     else {
         // Standard screen blend for medium/low quality
@@ -735,6 +791,7 @@ BlendGlow16(
 
     return PF_Err_NONE;
 }
+
 
 static PF_Err
 Render(
@@ -986,6 +1043,7 @@ Render(
                     BlendData blend_data;
                     blend_data.glow = &blur_v_world;
                     blend_data.quality = quality;
+                    blend_data.strength = strength; // Pass the strength parameter to blend functions
 
                     if (PF_WORLD_IS_DEEP(output)) {
                         ERR(suites.Iterate16Suite2()->iterate(in_data,
