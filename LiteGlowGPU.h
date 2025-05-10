@@ -97,7 +97,7 @@ typedef struct {
     int quality;             // Quality setting
     bool gpuAccelerationAvailable; // Whether GPU acceleration is available
     bool fftInitialized;     // Whether FFT has been initialized
-    // No GPU-specific data
+    // Additional FFT/GPU-related data would go here in a real implementation
 } LiteGlowSequenceData;
 
 // Structure for glow parameters - updated with new fields
