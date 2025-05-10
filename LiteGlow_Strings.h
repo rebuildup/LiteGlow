@@ -29,9 +29,6 @@ typedef enum {
 	StrID_Radius_Param_Name,
 	StrID_Threshold_Param_Name,
 	StrID_Quality_Param_Name,
-	StrID_Blend_Param_Name,
-	StrID_Performance_Param_Name,        // NEW: Performance mode parameter name
-	StrID_Performance_Param_Description, // NEW: Performance mode parameter description
 	StrID_Quality_Param_Choices,
 	StrID_NUMTYPES
 } StrIDType;

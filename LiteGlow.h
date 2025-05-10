@@ -1,7 +1,7 @@
 #pragma once
 
-#ifndef LITEGLOW_GPU_H
-#define LITEGLOW_GPU_H
+#ifndef LITEGLOW_H
+#define LITEGLOW_H
 
 typedef unsigned char        u_char;
 typedef unsigned short       u_short;
@@ -35,29 +35,24 @@ typedef unsigned short PixelType;
 #include "LiteGlow_Strings.h"
 
 /* Versioning information */
-#define MAJOR_VERSION    2
-#define MINOR_VERSION    0   // New GPU-accelerated version
-#define BUG_VERSION      0
-#define STAGE_VERSION    PF_Stage_DEVELOP
-#define BUILD_VERSION    1
+#define MAJOR_VERSION    1
+#define MINOR_VERSION    0
+#define BUG_VERSION      0  // Bug fix version
+#define STAGE_VERSION    PF_Stage_DEVELOP  // DEVELOP, ALPHA, BETA, or RELEASE
+#define BUILD_VERSION    1  // Build number
 
 /* Parameter defaults and limits */
 #define    STRENGTH_MIN       0
-#define    STRENGTH_MAX       5000
-#define    STRENGTH_DFLT      800
+#define    STRENGTH_MAX       3000   // Increased to 3000 as requested
+#define    STRENGTH_DFLT      800    // Default value
 
 #define    RADIUS_MIN         1
-#define    RADIUS_MAX         200
+#define    RADIUS_MAX         50
 #define    RADIUS_DFLT        10
 
 #define    THRESHOLD_MIN      0
 #define    THRESHOLD_MAX      255
 #define    THRESHOLD_DFLT     80
-
-/* Blend ratio parameter for overlay method */
-#define    BLEND_MIN          0
-#define    BLEND_MAX          100
-#define    BLEND_DFLT         100
 
 /* Quality settings */
 #define    QUALITY_LOW        1
@@ -67,7 +62,7 @@ typedef unsigned short PixelType;
 #define    QUALITY_DFLT       QUALITY_MEDIUM
 
 /* Maximum kernel size for Gaussian blur */
-#define    KERNEL_SIZE_MAX    128
+#define    KERNEL_SIZE_MAX    64
 
 enum {
     LITEGLOW_INPUT = 0,
@@ -75,8 +70,6 @@ enum {
     LITEGLOW_RADIUS,
     LITEGLOW_THRESHOLD,
     LITEGLOW_QUALITY,
-    LITEGLOW_BLEND,
-    LITEGLOW_PERFORMANCE,  // NEW: Performance mode parameter
     LITEGLOW_NUM_PARAMS
 };
 
@@ -84,36 +77,39 @@ enum {
     STRENGTH_DISK_ID = 1,
     RADIUS_DISK_ID,
     THRESHOLD_DISK_ID,
-    QUALITY_DISK_ID,
-    BLEND_DISK_ID,
-    PERFORMANCE_DISK_ID  // NEW: Performance mode disk ID
+    QUALITY_DISK_ID
 };
 
 // Sequence data for caching information between renders
 typedef struct {
+    A_long sequence_id;      // Unique ID for this sequence
+    float gaussKernel[KERNEL_SIZE_MAX * 2 + 1]; // Cached Gaussian kernel
     int gaussKernelSize;     // Size of kernel
     int kernelRadius;        // Radius of kernel
     float sigma;             // Sigma value used for kernel
     int quality;             // Quality setting
-    bool gpuAccelerationAvailable; // Whether GPU acceleration is available
-    bool fftInitialized;     // Whether FFT has been initialized
-    // No GPU-specific data
 } LiteGlowSequenceData;
 
-// Structure for glow parameters - updated with new fields
+// Structure for glow parameters
 typedef struct {
     float strength;          // Glow strength
     float threshold;         // Brightness threshold
-    float radius;            // Glow radius
     PF_EffectWorldPtr input; // Input image for reference
+    float resolution_factor; // Downsampling factor
 } GlowData, * GlowDataP;
 
-// Structure for blur parameters - updated with new fields
+// Structure for blur parameters
 typedef struct {
     PF_EffectWorldPtr input;    // Source image
     int radius;                 // Blur radius
     float* kernel;              // Gaussian kernel
 } BlurData, * BlurDataP;
+
+// Structure for blend parameters
+typedef struct {
+    PF_EffectWorldPtr glow;     // Blurred glow image
+    int quality;                // Quality setting
+} BlendData, * BlendDataP;
 
 extern "C" {
 
@@ -129,4 +125,4 @@ extern "C" {
 
 }
 
-#endif // LITEGLOW_GPU_H
+#endif // LITEGLOW_H
