@@ -1,40 +1,3 @@
-/*******************************************************************/
-/*                                                                 */
-/*                      ADOBE CONFIDENTIAL                         */
-/*                   _ _ _ _ _ _ _ _ _ _ _ _ _                     */
-/*                                                                 */
-/* Copyright 2007-2025 Adobe Inc.                                  */
-/* All Rights Reserved.                                            */
-/*                                                                 */
-/* NOTICE:  All information contained herein is, and remains the   */
-/* property of Adobe Inc. and its suppliers, if                    */
-/* any.  The intellectual and technical concepts contained         */
-/* herein are proprietary to Adobe Inc. and its                    */
-/* suppliers and may be covered by U.S. and Foreign Patents,       */
-/* patents in process, and are protected by trade secret or        */
-/* copyright law.  Dissemination of this information or            */
-/* reproduction of this material is strictly forbidden unless      */
-/* prior written permission is obtained from Adobe Inc.            */
-/* Incorporated.                                                   */
-/*                                                                 */
-/*******************************************************************/
-
-/*	LiteGlow.cpp
-
-    An enhanced glow effect with true Gaussian blur, advanced edge detection,
-    and improved color handling for creating realistic luminescence effects.
-    Optimized with multi-frame rendering support and preview downsampling.
-
-    Revision History
-
-    Version		Change													Engineer	Date
-    =======		======													========	======
-    1.0			First implementation										Dev         5/8/2025
-    1.1         Enhanced with true Gaussian blur and edge detection      Dev         5/9/2025
-    1.2         Added multi-frame rendering and performance optimizations Dev         5/10/2025
-
-*/
-
 #include "LiteGlow.h"
 #include <math.h>
 
@@ -42,7 +5,7 @@
 #define PI 3.14159265358979323846
 #define KERNEL_SIZE_MAX 64
 
-// Our sequence data counter
+// Sequence data counter
 static A_long gSequenceCount = 0;
 
 static PF_Err
@@ -70,8 +33,6 @@ GlobalSetup(
     PF_ParamDef* params[],
     PF_LayerDef* output)
 {
-    PF_Err err = PF_Err_NONE;
-
     out_data->my_version = PF_VERSION(MAJOR_VERSION,
         MINOR_VERSION,
         BUG_VERSION,
@@ -86,7 +47,7 @@ GlobalSetup(
     // Enable Multi-Frame Rendering support if available
     out_data->out_flags2 = PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
 
-    return err;
+    return PF_Err_NONE;
 }
 
 static PF_Err
@@ -97,11 +58,11 @@ ParamsSetup(
     PF_LayerDef* output)
 {
     PF_Err err = PF_Err_NONE;
-    PF_ParamDef	def;
+    PF_ParamDef def;
 
     AEFX_CLR_STRUCT(def);
 
-    // Add Strength slider parameter with expanded range (0-3000)
+    // Add Strength slider parameter
     PF_ADD_FLOAT_SLIDERX(STR(StrID_Strength_Param_Name),
         STRENGTH_MIN,
         STRENGTH_MAX,
@@ -170,24 +131,20 @@ SequenceSetup(
         return PF_Err_OUT_OF_MEMORY;
     }
 
-    // Get pointer to sequence data
+    // Initialize sequence data
     LiteGlowSequenceData* sequenceData = (LiteGlowSequenceData*)suites.HandleSuite1()->host_lock_handle(sequenceDataH);
     if (!sequenceData) {
         suites.HandleSuite1()->host_dispose_handle(sequenceDataH);
         return PF_Err_OUT_OF_MEMORY;
     }
 
-    // Initialize sequence data
     A_long id = ++gSequenceCount;
     sequenceData->sequence_id = id;
     sequenceData->gaussKernelSize = 0;
     sequenceData->kernelRadius = 0;
     sequenceData->quality = QUALITY_MEDIUM;
 
-    // Unlock the handle
     suites.HandleSuite1()->host_unlock_handle(sequenceDataH);
-
-    // Store handle in sequence data
     out_data->sequence_data = sequenceDataH;
 
     return err;
@@ -200,10 +157,7 @@ SequenceResetup(
     PF_ParamDef* params[],
     PF_LayerDef* output)
 {
-    PF_Err err = PF_Err_NONE;
-
-    // Nothing specific needed here as our sequence data is simple
-    return err;
+    return PF_Err_NONE;
 }
 
 static PF_Err
@@ -213,9 +167,7 @@ SequenceFlatten(
     PF_ParamDef* params[],
     PF_LayerDef* output)
 {
-    PF_Err err = PF_Err_NONE;
-    // No special flattening needed, our data structure is simple
-    return err;
+    return PF_Err_NONE;
 }
 
 static PF_Err
@@ -236,39 +188,29 @@ SequenceSetdown(
     return err;
 }
 
-// Get pixel from buffer with boundary checking - 8-bit version
+// Pixel access functions with boundary checking
 inline PF_Pixel8* GetPixel8(PF_EffectWorld* world, int x, int y) {
-    // Clamp coordinates to valid range
     x = MAX(0, MIN(x, world->width - 1));
     y = MAX(0, MIN(y, world->height - 1));
-
-    // Get pixel pointer
     return (PF_Pixel8*)((char*)world->data + y * world->rowbytes + x * sizeof(PF_Pixel8));
 }
 
-// Get pixel from buffer with boundary checking - 16-bit version
 inline PF_Pixel16* GetPixel16(PF_EffectWorld* world, int x, int y) {
-    // Clamp coordinates to valid range
     x = MAX(0, MIN(x, world->width - 1));
     y = MAX(0, MIN(y, world->height - 1));
-
-    // Get pixel pointer
     return (PF_Pixel16*)((char*)world->data + y * world->rowbytes + x * sizeof(PF_Pixel16));
 }
 
-// Calculate perceptual luminance with more accurate coefficients - 8-bit
+// Perceptual luminance calculation - sRGB coefficients
 inline float PerceivedBrightness8(const PF_Pixel8* p) {
-    // sRGB luminance factors for more accurate perceptual brightness
     return (0.2126f * p->red + 0.7152f * p->green + 0.0722f * p->blue);
 }
 
-// Calculate perceptual luminance with more accurate coefficients - 16-bit
 inline float PerceivedBrightness16(const PF_Pixel16* p) {
-    // sRGB luminance factors for more accurate perceptual brightness
     return (0.2126f * p->red + 0.7152f * p->green + 0.0722f * p->blue);
 }
 
-// Calculate edge strength using Sobel operators - 8-bit
+// Edge detection using Sobel operators
 inline float EdgeStrength8(PF_EffectWorld* world, int x, int y) {
     const int sobel_x[3][3] = {
         {-1, 0, 1},
@@ -284,7 +226,6 @@ inline float EdgeStrength8(PF_EffectWorld* world, int x, int y) {
 
     float gx = 0.0f, gy = 0.0f;
 
-    // Apply Sobel operators
     for (int j = -1; j <= 1; j++) {
         for (int i = -1; i <= 1; i++) {
             PF_Pixel8* p = GetPixel8(world, x + i, y + j);
@@ -295,11 +236,9 @@ inline float EdgeStrength8(PF_EffectWorld* world, int x, int y) {
         }
     }
 
-    // Calculate gradient magnitude
     return sqrt(gx * gx + gy * gy);
 }
 
-// Calculate edge strength using Sobel operators - 16-bit
 inline float EdgeStrength16(PF_EffectWorld* world, int x, int y) {
     const int sobel_x[3][3] = {
         {-1, 0, 1},
@@ -315,7 +254,6 @@ inline float EdgeStrength16(PF_EffectWorld* world, int x, int y) {
 
     float gx = 0.0f, gy = 0.0f;
 
-    // Apply Sobel operators
     for (int j = -1; j <= 1; j++) {
         for (int i = -1; i <= 1; i++) {
             PF_Pixel16* p = GetPixel16(world, x + i, y + j);
@@ -326,13 +264,11 @@ inline float EdgeStrength16(PF_EffectWorld* world, int x, int y) {
         }
     }
 
-    // Calculate gradient magnitude
     return sqrt(gx * gx + gy * gy);
 }
 
 // Generate 1D Gaussian kernel
 void GenerateGaussianKernel(float sigma, float* kernel, int* radius) {
-    // Calculate radius based on sigma (3*sigma covers 99.7% of the distribution)
     *radius = MIN(KERNEL_SIZE_MAX / 2, (int)(3.0f * sigma + 0.5f));
 
     float sum = 0.0f;
@@ -349,6 +285,8 @@ void GenerateGaussianKernel(float sigma, float* kernel, int* radius) {
         kernel[i] /= sum;
     }
 }
+
+// Extract bright areas for glow - 8-bit version
 static PF_Err
 ExtractBrightAreas8(
     void* refcon,
@@ -359,34 +297,32 @@ ExtractBrightAreas8(
 {
     GlowDataP gdata = reinterpret_cast<GlowDataP>(refcon);
 
-    // Modified strength handling for more powerful effect
+    // Scale strength for more powerful effect
     float strength = 0.0f;
     if (gdata->strength <= 3000.0f) {
-        strength = gdata->strength / 1000.0f; // Original scaling for values up to 3000
+        strength = gdata->strength / 1000.0f;
     }
     else {
-        // Enhanced scaling for values above 3000
-        float base = 3.0f; // Base value at 3000
-        float excess = (gdata->strength - 3000.0f) / 7000.0f; // Normalize excess portion
-        strength = base + (excess * excess * 10.0f); // Apply quadratic scaling to excess
+        float base = 3.0f;
+        float excess = (gdata->strength - 3000.0f) / 7000.0f;
+        strength = base + (excess * excess * 10.0f);
     }
 
     float threshold = gdata->threshold / 255.0f;
     float resolution_factor = gdata->resolution_factor;
-
     PF_EffectWorld* input = gdata->input;
 
     // Get perceived brightness
     float perceivedBrightness = PerceivedBrightness8(inP) / 255.0f;
 
-    // For preview modes, simplify edge detection based on resolution factor
+    // Edge detection based on resolution factor
     float edgeStrength = 0.0f;
     if (resolution_factor > 0.5f) {
-        // Full quality edge detection for high-res rendering
+        // Full quality edge detection
         edgeStrength = EdgeStrength8(input, xL, yL) / 255.0f;
     }
     else {
-        // Simplified edge detection for preview - just use brightness contrast
+        // Simplified edge detection for preview
         float leftBrightness = PerceivedBrightness8(GetPixel8(input, xL - 1, yL)) / 255.0f;
         float rightBrightness = PerceivedBrightness8(GetPixel8(input, xL + 1, yL)) / 255.0f;
         float topBrightness = PerceivedBrightness8(GetPixel8(input, xL, yL - 1)) / 255.0f;
@@ -395,10 +331,10 @@ ExtractBrightAreas8(
         float dx = (rightBrightness - leftBrightness) * 0.5f;
         float dy = (bottomBrightness - topBrightness) * 0.5f;
 
-        edgeStrength = sqrtf(dx * dx + dy * dy) * 2.0f; // Scale up to match full Sobel
+        edgeStrength = sqrtf(dx * dx + dy * dy) * 2.0f;
     }
 
-    // Enhanced intensity for combined brightness and edge detection
+    // Combine brightness and edge detection
     float intensity = MAX(perceivedBrightness, edgeStrength * 0.5f);
 
     // Apply threshold with smooth falloff
@@ -406,10 +342,10 @@ ExtractBrightAreas8(
     float glow_amount = 0.0f;
 
     if (intensity > threshold) {
-        // Modified falloff for stronger glow
+        // Apply threshold with falloff
         glow_amount = MIN(1.0f, (intensity - threshold) / threshold_falloff);
 
-        // Apply strength with enhanced curve for high values
+        // Apply strength with enhanced curve
         float power_curve = (strength > 5.0f) ? 0.6f : 0.8f;
         glow_amount = glow_amount * strength;
         glow_amount = powf(glow_amount, power_curve);
@@ -422,9 +358,8 @@ ExtractBrightAreas8(
         // Enhanced color boost for high-intensity glows
         float max_component = MAX(MAX(outP->red, outP->green), outP->blue);
         if (max_component > 0) {
-            // More aggressive saturation boost that scales with strength
             float saturation_boost = 1.2f + (strength * 0.05f);
-            saturation_boost = MIN(saturation_boost, 2.5f); // Cap at 2.5x to prevent oversaturation
+            saturation_boost = MIN(saturation_boost, 2.5f);
 
             outP->red = (A_u_char)MIN(255.0f, outP->red * saturation_boost);
             outP->green = (A_u_char)MIN(255.0f, outP->green * saturation_boost);
@@ -442,7 +377,7 @@ ExtractBrightAreas8(
     return PF_Err_NONE;
 }
 
-// Step 3: Similarly modify the ExtractBrightAreas16 function
+// Extract bright areas for glow - 16-bit version
 static PF_Err
 ExtractBrightAreas16(
     void* refcon,
@@ -453,34 +388,32 @@ ExtractBrightAreas16(
 {
     GlowDataP gdata = reinterpret_cast<GlowDataP>(refcon);
 
-    // Modified strength handling for more powerful effect
+    // Scale strength for more powerful effect
     float strength = 0.0f;
     if (gdata->strength <= 3000.0f) {
-        strength = gdata->strength / 1000.0f; // Original scaling for values up to 3000
+        strength = gdata->strength / 1000.0f;
     }
     else {
-        // Enhanced scaling for values above 3000
-        float base = 3.0f; // Base value at 3000
-        float excess = (gdata->strength - 3000.0f) / 7000.0f; // Normalize excess portion
-        strength = base + (excess * excess * 10.0f); // Apply quadratic scaling to excess
+        float base = 3.0f;
+        float excess = (gdata->strength - 3000.0f) / 7000.0f;
+        strength = base + (excess * excess * 10.0f);
     }
 
     float threshold = gdata->threshold / 255.0f;
     float resolution_factor = gdata->resolution_factor;
-
     PF_EffectWorld* input = gdata->input;
 
     // Get perceived brightness
     float perceivedBrightness = PerceivedBrightness16(inP) / 32768.0f;
 
-    // For preview modes, simplify edge detection based on resolution factor
+    // Edge detection based on resolution factor
     float edgeStrength = 0.0f;
     if (resolution_factor > 0.5f) {
-        // Full quality edge detection for high-res rendering
+        // Full quality edge detection
         edgeStrength = EdgeStrength16(input, xL, yL) / 32768.0f;
     }
     else {
-        // Simplified edge detection for preview - just use brightness contrast
+        // Simplified edge detection for preview
         float leftBrightness = PerceivedBrightness16(GetPixel16(input, xL - 1, yL)) / 32768.0f;
         float rightBrightness = PerceivedBrightness16(GetPixel16(input, xL + 1, yL)) / 32768.0f;
         float topBrightness = PerceivedBrightness16(GetPixel16(input, xL, yL - 1)) / 32768.0f;
@@ -489,10 +422,10 @@ ExtractBrightAreas16(
         float dx = (rightBrightness - leftBrightness) * 0.5f;
         float dy = (bottomBrightness - topBrightness) * 0.5f;
 
-        edgeStrength = sqrtf(dx * dx + dy * dy) * 2.0f; // Scale up to match full Sobel
+        edgeStrength = sqrtf(dx * dx + dy * dy) * 2.0f;
     }
 
-    // Enhanced intensity for combined brightness and edge detection
+    // Combine brightness and edge detection
     float intensity = MAX(perceivedBrightness, edgeStrength * 0.5f);
 
     // Apply threshold with smooth falloff
@@ -500,10 +433,10 @@ ExtractBrightAreas16(
     float glow_amount = 0.0f;
 
     if (intensity > threshold) {
-        // Modified falloff for stronger glow
+        // Apply threshold with falloff
         glow_amount = MIN(1.0f, (intensity - threshold) / threshold_falloff);
 
-        // Apply strength with enhanced curve for high values
+        // Apply strength with enhanced curve
         float power_curve = (strength > 5.0f) ? 0.6f : 0.8f;
         glow_amount = glow_amount * strength;
         glow_amount = powf(glow_amount, power_curve);
@@ -516,9 +449,8 @@ ExtractBrightAreas16(
         // Enhanced color boost for high-intensity glows
         float max_component = MAX(MAX(outP->red, outP->green), outP->blue);
         if (max_component > 0) {
-            // More aggressive saturation boost that scales with strength
             float saturation_boost = 1.2f + (strength * 0.05f);
-            saturation_boost = MIN(saturation_boost, 2.5f); // Cap at 2.5x to prevent oversaturation
+            saturation_boost = MIN(saturation_boost, 2.5f);
 
             outP->red = (A_u_short)MIN(32768.0f, outP->red * saturation_boost);
             outP->green = (A_u_short)MIN(32768.0f, outP->green * saturation_boost);
@@ -675,6 +607,8 @@ GaussianBlurV16(
 
     return PF_Err_NONE;
 }
+
+// Blend original and glow - 8-bit
 static PF_Err
 BlendGlow8(
     void* refcon,
@@ -686,7 +620,7 @@ BlendGlow8(
     BlendDataP bdata = reinterpret_cast<BlendDataP>(refcon);
     PF_EffectWorld* glowWorld = bdata->glow;
     int quality = bdata->quality;
-    float strength = bdata->strength; // Use the strength member we added to BlendData
+    float strength = bdata->strength;
 
     // Get the glow value for this pixel
     PF_Pixel8* glowP = GetPixel8(glowWorld, xL, yL);
@@ -701,7 +635,7 @@ BlendGlow8(
         // Add highlight boost where glow is concentrated
         float glow_intensity = (glowP->red + glowP->green + glowP->blue) / (3.0f * 255.0f);
 
-        // Scale highlight boost with strength (for values > 3000)
+        // Scale highlight boost with strength
         float highlight_factor = (strength > 3000.0f) ?
             0.2f + ((strength - 3000.0f) / 7000.0f) * 0.4f : 0.2f;
 
@@ -733,7 +667,7 @@ BlendGlow8(
     return PF_Err_NONE;
 }
 
-// Step 5: Similarly modify BlendGlow16 for 16-bit processing
+// Blend original and glow - 16-bit
 static PF_Err
 BlendGlow16(
     void* refcon,
@@ -745,7 +679,7 @@ BlendGlow16(
     BlendDataP bdata = reinterpret_cast<BlendDataP>(refcon);
     PF_EffectWorld* glowWorld = bdata->glow;
     int quality = bdata->quality;
-    float strength = bdata->strength; // Use the strength member we added to BlendData
+    float strength = bdata->strength;
 
     // Get the glow value for this pixel
     PF_Pixel16* glowP = GetPixel16(glowWorld, xL, yL);
@@ -760,7 +694,7 @@ BlendGlow16(
         // Add highlight boost where glow is concentrated
         float glow_intensity = (glowP->red + glowP->green + glowP->blue) / (3.0f * 32768.0f);
 
-        // Scale highlight boost with strength (for values > 3000)
+        // Scale highlight boost with strength
         float highlight_factor = (strength > 3000.0f) ?
             0.2f + ((strength - 3000.0f) / 7000.0f) * 0.4f : 0.2f;
 
@@ -791,7 +725,6 @@ BlendGlow16(
 
     return PF_Err_NONE;
 }
-
 
 static PF_Err
 Render(
@@ -899,7 +832,7 @@ Render(
 
             // Generate Gaussian kernel or use cached one if available
             int kernel_radius;
-            float kernel[KERNEL_SIZE_MAX * 2 + 1]; // Static array instead of std::vector
+            float kernel[KERNEL_SIZE_MAX * 2 + 1];
 
             // Check if we can use a cached kernel from sequence data
             LiteGlowSequenceData* seq_data = NULL;
@@ -985,7 +918,7 @@ Render(
                         &blur_v_world)); // destination
                 }
 
-                // For high quality, apply a second blur pass (when not in preview mode)
+                // For high quality, apply a second blur pass when not in preview mode
                 if (quality == QUALITY_HIGH && !err && strength > 500.0f && resolution_factor > 0.9f) {
                     // Second horizontal blur
                     bdata.input = &blur_v_world;
@@ -1043,7 +976,7 @@ Render(
                     BlendData blend_data;
                     blend_data.glow = &blur_v_world;
                     blend_data.quality = quality;
-                    blend_data.strength = strength; // Pass the strength parameter to blend functions
+                    blend_data.strength = strength;
 
                     if (PF_WORLD_IS_DEEP(output)) {
                         ERR(suites.Iterate16Suite2()->iterate(in_data,
@@ -1086,32 +1019,29 @@ PF_Err PluginDataEntryFunction2(
     const char* inHostName,
     const char* inHostVersion)
 {
-    PF_Err result = PF_Err_INVALID_CALLBACK;
-
-    result = PF_REGISTER_EFFECT_EXT2(
+    PF_Err result = PF_REGISTER_EFFECT_EXT2(
         inPtr,
         inPluginDataCallBackPtr,
-        "LiteGlow", // Name
-        "ADBE LiteGlow", // Match Name
-        "LiteGlow", // Category
-        AE_RESERVED_INFO, // Reserved Info
-        "EffectMain",	// Entry point
-        "https://www.adobe.com");	// support URL
+        "LiteGlow",          // Name
+        "ADBE LiteGlow",     // Match Name
+        "LiteGlow",          // Category
+        AE_RESERVED_INFO,    // Reserved Info
+        "EffectMain",        // Entry point
+        "https://www.adobe.com"); // Support URL
 
     return result;
 }
 
-
 PF_Err
 EffectMain(
-    PF_Cmd			cmd,
+    PF_Cmd cmd,
     PF_InData* in_data,
     PF_OutData* out_data,
     PF_ParamDef* params[],
     PF_LayerDef* output,
     void* extra)
 {
-    PF_Err		err = PF_Err_NONE;
+    PF_Err err = PF_Err_NONE;
 
     try {
         switch (cmd) {
