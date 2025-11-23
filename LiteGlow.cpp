@@ -1,5 +1,7 @@
 #include "LiteGlow.h"
 
+#include <algorithm>
+
 static PF_Err 
 About (	
 	PF_InData		*in_data,
@@ -137,14 +139,13 @@ Render (
 		// 16-bit
 		A_u_short thresh16 = (A_u_short)((threshold / 255.0) * 32768.0);
 		for (int y = 0; y < height; y++) {
-			A_u_short *row = (A_u_short*)((char*)output->data + y * rowbytes);
+			PF_Pixel16 *row = (PF_Pixel16*)((char*)output->data + y * rowbytes);
 			for (int x = 0; x < width; x++) {
 				// Simple logic: if pixel > threshold, boost it
-				if (row[x * 4 + 1] > thresh16) { // Green channel check for simplicity
-					row[x * 4 + 0] = std::min(32768, (int)(row[x * 4 + 0] + strength)); // A
-					row[x * 4 + 1] = std::min(32768, (int)(row[x * 4 + 1] + strength)); // R
-					row[x * 4 + 2] = std::min(32768, (int)(row[x * 4 + 2] + strength)); // G
-					row[x * 4 + 3] = std::min(32768, (int)(row[x * 4 + 3] + strength)); // B
+				if (row[x].green > thresh16) {
+					row[x].red = std::min(32768, (int)(row[x].red + strength));
+					row[x].green = std::min(32768, (int)(row[x].green + strength));
+					row[x].blue = std::min(32768, (int)(row[x].blue + strength));
 				}
 			}
 		}
@@ -152,15 +153,12 @@ Render (
 		// 8-bit
 		A_u_char thresh8 = (A_u_char)threshold;
 		for (int y = 0; y < height; y++) {
-			A_u_char *row = (A_u_char*)((char*)output->data + y * rowbytes);
+			PF_Pixel8 *row = (PF_Pixel8*)((char*)output->data + y * rowbytes);
 			for (int x = 0; x < width; x++) {
-				if (row[x * 4 + 2] > thresh8) { // Green
-					// row[x*4+0] is Alpha, 1 is Red, 2 is Green, 3 is Blue (ARGB)
-					// Wait, PF_Pixel is ARGB usually.
-					// A: 0, R: 1, G: 2, B: 3
-					row[x * 4 + 1] = std::min(255, (int)(row[x * 4 + 1] + strength / 10.0));
-					row[x * 4 + 2] = std::min(255, (int)(row[x * 4 + 2] + strength / 10.0));
-					row[x * 4 + 3] = std::min(255, (int)(row[x * 4 + 3] + strength / 10.0));
+				if (row[x].green > thresh8) {
+					row[x].red = std::min(255, (int)(row[x].red + strength / 10.0));
+					row[x].green = std::min(255, (int)(row[x].green + strength / 10.0));
+					row[x].blue = std::min(255, (int)(row[x].blue + strength / 10.0));
 				}
 			}
 		}
@@ -229,13 +227,21 @@ EffectMain(
 									output);
 				break;
 				
+			case PF_Cmd_SEQUENCE_SETUP:
+			case PF_Cmd_SEQUENCE_SETDOWN:
+			case PF_Cmd_SEQUENCE_FLATTEN:
+				break;
+				
+			case PF_Cmd_FRAME_SETUP:
+			case PF_Cmd_FRAME_SETDOWN:
+				break;
+				
 			case PF_Cmd_RENDER:
 				err = Render(	in_data,
 								out_data,
 								params,
 								output);
 				break;
-		}
 	}
 	catch(PF_Err &thrown_err){
 		err = thrown_err;
