@@ -135,19 +135,6 @@ static void IIR_1D(float* data, int count, const IIRCoeffs& c) {
     }
 }
 
-// -----------------------------------------------------------------------------
-// Rendering
-// -----------------------------------------------------------------------------
-
-template <typename Pixel>
-static PF_Err RenderGeneric(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_LayerDef* output) {
-    PF_EffectWorld* input = &params[LITEGLOW_INPUT]->u.ld;
-    
-    const int width = output->width;
-    const int height = output->height;
-    
-    if (width <= 0 || height <= 0) return PF_Err_NONE;
-
     const A_u_char* input_base = reinterpret_cast<const A_u_char*>(input->data);
     A_u_char* output_base = reinterpret_cast<A_u_char*>(output->data);
     const A_long input_rowbytes = input->rowbytes;
@@ -634,18 +621,5 @@ PF_Err EffectMain(PF_Cmd cmd,
 {
     PF_Err err = PF_Err_NONE;
     try {
-        switch (cmd) {
-        case PF_Cmd_ABOUT: err = About(in_data, out_data, params, output); break;
-        case PF_Cmd_GLOBAL_SETUP: err = GlobalSetup(in_data, out_data, params, output); break;
-        case PF_Cmd_PARAMS_SETUP: err = ParamsSetup(in_data, out_data, params, output); break;
-        case PF_Cmd_RENDER: err = Render(in_data, out_data, params, output); break;
-        case PF_Cmd_SMART_PRE_RENDER: err = PreRender(in_data, out_data, (PF_PreRenderExtra*)extra); break;
-        case PF_Cmd_SMART_RENDER: err = SmartRender(in_data, out_data, (PF_SmartRenderExtra*)extra); break;
-        default: break;
-        }
-    }
-    catch (...) {
-        err = PF_Err_INTERNAL_STRUCT_DAMAGED;
-    }
     return err;
 }

@@ -51,31 +51,6 @@ enum {
 typedef struct {
     A_long sequence_id;
     float gaussKernel[KERNEL_SIZE_MAX * 2 + 1]; // Cached Gaussian kernel
-    int gaussKernelSize;
-    int kernelRadius;
-    float sigma;
-    int quality;
-} LiteGlowSequenceData;
-
-// Structure for glow parameters
-typedef struct {
-    float strength;
-    float threshold;
-    PF_EffectWorldPtr input; // Input image for reference
-    float resolution_factor; // Downsampling factor
-} GlowData, * GlowDataP;
-
-// Structure for blur parameters
-typedef struct {
-    PF_EffectWorldPtr input;
-    int radius;
-    float* kernel;
-} BlurData, * BlurDataP;
-
-// Structure for blend parameters
-typedef struct {
-    PF_EffectWorldPtr glow;
-    int quality;
     float strength;
 } BlendData, * BlendDataP;
 
