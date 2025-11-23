@@ -767,24 +767,23 @@ Render(
 
     // Create temporary worlds with matching bit depth
     PF_Boolean is_16bit = PF_WORLD_IS_DEEP(output);
-    PF_NewWorldFlags world_flags = is_16bit ? PF_NewWorldFlag_DEEP : PF_NewWorldFlag_NONE;
 
     ERR(suites.WorldSuite1()->new_world(in_data->effect_ref,
         output->width,
         output->height,
-        world_flags,
+        is_16bit,
         &bright_world));
 
     ERR(suites.WorldSuite1()->new_world(in_data->effect_ref,
         output->width,
         output->height,
-        world_flags,
+        is_16bit,
         &blur_h_world));
 
     ERR(suites.WorldSuite1()->new_world(in_data->effect_ref,
         output->width,
         output->height,
-        world_flags,
+        is_16bit,
         &blur_v_world));
 
     if (!err) {
