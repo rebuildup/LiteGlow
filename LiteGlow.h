@@ -20,6 +20,11 @@
 #include "AE_EffectCBSuites.h"
 #include "String_Utils.h"
 #include "AE_GeneralPlug.h"
+
+/* Define PF_TABLE_BITS before including AEFX_ChannelDepthTpl.h */
+#define PF_TABLE_BITS	12
+#define PF_TABLE_SZ_16	4096
+
 #include "AEFX_ChannelDepthTpl.h"
 #include "AEGP_SuiteHandler.h"
 
@@ -31,15 +36,6 @@
 #define	BUG_VERSION		0
 #define	STAGE_VERSION	PF_Stage_DEVELOP
 #define	BUILD_VERSION	1
-
-typedef unsigned char        u_char;
-typedef unsigned short       u_short;
-typedef unsigned short       u_int16;
-typedef unsigned long        u_long;
-typedef short int            int16;
-
-#define PF_TABLE_BITS    12
-#define PF_TABLE_SZ_16   4096
 
 #define STRENGTH_MIN       0
 #define STRENGTH_MAX       2000
@@ -60,9 +56,6 @@ typedef short int            int16;
 #define QUALITY_NUM_CHOICES 3
 #define QUALITY_DFLT       QUALITY_MEDIUM
 
-// Maximum kernel size for Gaussian blur
-#define KERNEL_SIZE_MAX    64
-
 enum {
     LITEGLOW_INPUT = 0,
     LITEGLOW_NUM_PARAMS
@@ -74,10 +67,6 @@ enum {
     THRESHOLD_DISK_ID,
     QUALITY_DISK_ID
 };
-
-typedef struct BlendData {
-    PF_FpLong strengthF;
-} BlendData, *BlendDataP;
 
 extern "C" {
     DllExport
