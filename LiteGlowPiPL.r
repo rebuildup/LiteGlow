@@ -43,17 +43,20 @@ resource 'PiPL' (16000) {
         AE_Effect_Global_OutFlags {
             0x06000400
         },
+        AE_Effect_Global_OutFlags {
+            0x02000400
+        },
         AE_Effect_Global_OutFlags_2 {
             0x08000000
         },
         AE_Effect_Match_Name {
-            "ADBE LiteGlow"
+            "361do LiteGlow"
         },
         AE_Reserved_Info {
             0
         },
         AE_Effect_Support_URL {
-            "https://www.adobe.com"
+            "https://github.com/rebuildup/Ae_LiteGlow"
         }
     }
 };

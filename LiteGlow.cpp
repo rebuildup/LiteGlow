@@ -1023,11 +1023,11 @@ PF_Err PluginDataEntryFunction2(
         inPtr,
         inPluginDataCallBackPtr,
         "LiteGlow",          // Name
-        "ADBE LiteGlow",     // Match Name
-        "LiteGlow",          // Category
+        "361do LiteGlow",     // Match Name
+        "361do_plugins",          // Category
         AE_RESERVED_INFO,    // Reserved Info
         "EffectMain",        // Entry point
-        "https://www.adobe.com"); // Support URL
+        "https://github.com/rebuildup/Ae_LiteGlow"); // Support URL
 
     return result;
 }
