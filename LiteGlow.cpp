@@ -814,21 +814,6 @@ static void UnionLRect(const PF_LRect *src, PF_LRect *dst) {
 }
 
 static PF_Err
-PreRender(
-    PF_InData* in_data,
-    PF_OutData* out_data,
-    void* extraP)
-{
-    PF_Err err = PF_Err_NONE;
-    PF_PreRenderExtra_Local* extra = (PF_PreRenderExtra_Local*)extraP;
-    PF_RenderRequest req = extra->input->output_request;
-    PF_CheckoutResult in_result;
-
-    req.preserve_rgb_of_zero_alpha = FALSE;
-
-    ERR(extra->cb->checkout_layer(
-        in_data->effect_ref,
-        LITEGLOW_INPUT,
         LITEGLOW_INPUT,
         &req,
         in_data->current_time,
