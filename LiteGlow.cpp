@@ -1,3 +1,61 @@
+#define NOMINMAX
+#include "LiteGlow.h"
+
+#include <vector>
+#include <algorithm>
+#include <cmath>
+#include <thread>
+#include <atomic>
+#include <limits>
+
+// -----------------------------------------------------------------------------
+// Constants & Helpers
+// -----------------------------------------------------------------------------
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+template <typename T>
+static inline T Clamp(T val, T minVal, T maxVal) {
+    return std::max(minVal, std::min(val, maxVal));
+}
+
+// -----------------------------------------------------------------------------
+// Pixel Traits
+// -----------------------------------------------------------------------------
+
+template <typename PixelT>
+struct LiteGlowPixelTraits;
+
+template <>
+struct LiteGlowPixelTraits<PF_Pixel> {
+    using ChannelType = A_u_char;
+    static constexpr float MAX_VAL = 255.0f;
+    static inline float ToFloat(ChannelType v) { return static_cast<float>(v); }
+    static inline ChannelType FromFloat(float v) { return static_cast<ChannelType>(Clamp(v, 0.0f, MAX_VAL) + 0.5f); }
+};
+
+template <>
+struct LiteGlowPixelTraits<PF_Pixel16> {
+    using ChannelType = A_u_short;
+    static constexpr float MAX_VAL = 32768.0f;
+    static inline float ToFloat(ChannelType v) { return static_cast<float>(v); }
+    static inline ChannelType FromFloat(float v) { return static_cast<ChannelType>(Clamp(v, 0.0f, MAX_VAL) + 0.5f); }
+};
+
+template <>
+struct LiteGlowPixelTraits<PF_PixelFloat> {
+    using ChannelType = PF_FpShort;
+    static constexpr float MAX_VAL = 1.0f;
+    static inline float ToFloat(ChannelType v) { return static_cast<float>(v); }
+    static inline ChannelType FromFloat(float v) { return static_cast<ChannelType>(v); }
+};
+
+// -----------------------------------------------------------------------------
+// IIR Gaussian Blur
+// -----------------------------------------------------------------------------
+
 // Simple IIR Gaussian Blur approximation (Young-van Vliet or similar)
 // Based on "Recursive Gaussian derivative filters" (Van Vliet et al.)
 // or a simplified version.
@@ -128,25 +186,13 @@ static PF_Err RenderGeneric(PF_InData* in_data, PF_OutData* out_data, PF_ParamDe
                 float luma = 0.2126f * r + 0.7152f * g + 0.0722f * b;
                 
                 if (luma > threshold) {
-                    // Soft threshold? Or hard?
-                    // Let's do simple linear ramp above threshold?
-                    // Or just keep value if > threshold.
-                    // "Glow" usually glows from bright parts.
-                    // Let's subtract threshold.
                     float factor = (luma - threshold) / (LiteGlowPixelTraits<Pixel>::MAX_VAL - threshold + 0.001f); // Normalize 0..1
-                    // Scale back up? Or just keep original intensity?
-                    // Usually: (Value - Threshold)
-                    
-                    // Let's keep original color but scaled by factor?
-                    // Or just (Color - Threshold)? Hard for RGB.
-                    // Let's use: if luma > threshold, keep Color. Else 0.
-                    // Smooth transition:
                     float alpha = std::min(1.0f, (luma - threshold) / (LiteGlowPixelTraits<Pixel>::MAX_VAL * 0.1f)); // Soft knee
                     
                     buf_row[x * 4 + 0] = r * alpha;
                     buf_row[x * 4 + 1] = g * alpha;
                     buf_row[x * 4 + 2] = b * alpha;
-                    buf_row[x * 4 + 3] = a; // Alpha needed? Maybe for compositing.
+                    buf_row[x * 4 + 3] = a;
                 } else {
                     buf_row[x * 4 + 0] = 0.0f;
                     buf_row[x * 4 + 1] = 0.0f;
@@ -246,11 +292,7 @@ static PF_Err RenderGeneric(PF_InData* in_data, PF_OutData* out_data, PF_ParamDe
 
     // 3. Composite
     // Additive blend: Output = Input + Glow * Strength
-    float strength_norm = strength / 100.0f; // Assuming slider is 0-10000, mapped to %?
-    // DFLT 800 -> 8.0? Or 80%?
-    // Usually 100 = 1.0. So 800 = 8.0.
-    // Let's assume 100 units = 1.0.
-    strength_norm = strength / 100.0f;
+    float strength_norm = strength / 100.0f; 
 
     auto composite_pass = [&](int start_y, int end_y) {
         for (int y = start_y; y < end_y; ++y) {
@@ -272,9 +314,7 @@ static PF_Err RenderGeneric(PF_InData* in_data, PF_OutData* out_data, PF_ParamDe
                 out_row[x].red = LiteGlowPixelTraits<Pixel>::FromFloat(ir + gr);
                 out_row[x].green = LiteGlowPixelTraits<Pixel>::FromFloat(ig + gg);
                 out_row[x].blue = LiteGlowPixelTraits<Pixel>::FromFloat(ib + gb);
-                out_row[x].alpha = in_row[x].alpha; // Keep original alpha? Or add glow alpha?
-                // Usually glow adds to alpha too if background is transparent.
-                // But for now, let's just add RGB and clamp.
+                out_row[x].alpha = in_row[x].alpha; 
             }
         }
     };
