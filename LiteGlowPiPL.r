@@ -6,13 +6,16 @@
 #endif
     
 resource 'PiPL' (16000) {
-    {
+    {    /* array properties: 12 elements */
+        /* [1] */
         Kind {
             AEEffect
         },
+        /* [2] */
         Name {
             "LiteGlow"
         },
+        /* [3] */
         Category {
             "361do_plugins"
         },
@@ -26,14 +29,40 @@ resource 'PiPL' (16000) {
         CodeMacARM64 {"EffectMain"},
     #endif
 #endif
+        /* [6] */
         AE_PiPL_Version {
             2,
             0
         },
+        /* [7] */
         AE_Effect_Spec_Version {
             PF_PLUG_IN_VERSION,
             PF_PLUG_IN_SUBVERS
         },
+        /* [8] */
+        AE_Effect_Version {
+            525313
+        },
+        /* [9] */
+        AE_Effect_Info_Flags {
+            0
+        },
+        /* [10] */
+        AE_Effect_Global_OutFlags {
+            0x02000000
+        },
+        AE_Effect_Global_OutFlags_2 {
+            0x00000000
+        },
+        /* [11] */
+        AE_Effect_Match_Name {
+            "361do LiteGlow"
+        },
+        /* [12] */
+        AE_Reserved_Info {
+            0
+        },
+        /* [13] */
         AE_Effect_Support_URL {
             "https://github.com/rebuildup/LiteGlow"
         }
