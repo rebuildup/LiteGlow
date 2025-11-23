@@ -766,25 +766,22 @@ Render(
     PF_EffectWorld bright_world, blur_h_world, blur_v_world;
 
     // Create temporary worlds with matching bit depth
-    // Check if input is 16-bit and create worlds accordingly
+    // WorldSuite2 automatically creates worlds with the same depth as output
     PF_Boolean is_deep = PF_WORLD_IS_DEEP(inputP);
     
-    ERR(suites.WorldSuite1()->new_world(in_data->effect_ref,
+    ERR(suites.WorldSuite2()->new_world(in_data->effect_ref,
         output->width,
         output->height,
-        is_deep,  // match input depth
         &bright_world));
 
-    ERR(suites.WorldSuite1()->new_world(in_data->effect_ref,
+    ERR(suites.WorldSuite2()->new_world(in_data->effect_ref,
         output->width,
         output->height,
-        is_deep,
         &blur_h_world));
 
-    ERR(suites.WorldSuite1()->new_world(in_data->effect_ref,
+    ERR(suites.WorldSuite2()->new_world(in_data->effect_ref,
         output->width,
         output->height,
-        is_deep,
         &blur_v_world));
 
     if (!err) {
