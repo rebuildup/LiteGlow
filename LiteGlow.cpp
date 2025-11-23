@@ -143,9 +143,9 @@ Render (
 			for (int x = 0; x < width; x++) {
 				// Simple logic: if pixel > threshold, boost it
 				if (row[x].green > thresh16) {
-					row[x].red = std::min(32768, (int)(row[x].red + strength));
-					row[x].green = std::min(32768, (int)(row[x].green + strength));
-					row[x].blue = std::min(32768, (int)(row[x].blue + strength));
+					row[x].red = (std::min)(32768, (int)(row[x].red + strength));
+					row[x].green = (std::min)(32768, (int)(row[x].green + strength));
+					row[x].blue = (std::min)(32768, (int)(row[x].blue + strength));
 				}
 			}
 		}
@@ -156,9 +156,9 @@ Render (
 			PF_Pixel8 *row = (PF_Pixel8*)((char*)output->data + y * rowbytes);
 			for (int x = 0; x < width; x++) {
 				if (row[x].green > thresh8) {
-					row[x].red = std::min(255, (int)(row[x].red + strength / 10.0));
-					row[x].green = std::min(255, (int)(row[x].green + strength / 10.0));
-					row[x].blue = std::min(255, (int)(row[x].blue + strength / 10.0));
+					row[x].red = (std::min)(255, (int)(row[x].red + strength / 10.0));
+					row[x].green = (std::min)(255, (int)(row[x].green + strength / 10.0));
+					row[x].blue = (std::min)(255, (int)(row[x].blue + strength / 10.0));
 				}
 			}
 		}
