@@ -11,24 +11,6 @@ typedef short int            int16;
 #define PF_TABLE_BITS    12
 #define PF_TABLE_SZ_16   4096
 
-#define PF_DEEP_COLOR_AWARE 1   // 16bpc pixel support
-
-#include "AEConfig.h"
-
-#ifdef AE_OS_WIN
-typedef unsigned short PixelType;
-#include <Windows.h>
-#endif
-
-#include "entry.h"
-#include "AE_Effect.h"
-#define BUG_VERSION      0
-#define STAGE_VERSION    PF_Stage_DEVELOP
-#define BUILD_VERSION    1
-
-// Parameter defaults and limits
-#define STRENGTH_MIN       0
-#define STRENGTH_MAX       10000
 #define STRENGTH_DFLT      800
 
 #define RADIUS_MIN         1
