@@ -1,5 +1,6 @@
 #include "LiteGlow.h"
 
+#define NOMINMAX
 #include <vector>
 #include <algorithm>
 #include <cmath>
@@ -25,10 +26,10 @@ static inline T Clamp(T val, T minVal, T maxVal) {
 // -----------------------------------------------------------------------------
 
 template <typename PixelT>
-struct PixelTraits;
+struct LiteGlowPixelTraits;
 
 template <>
-struct PixelTraits<PF_Pixel> {
+struct LiteGlowPixelTraits<PF_Pixel> {
     using ChannelType = A_u_char;
     static constexpr float MAX_VAL = 255.0f;
     static inline float ToFloat(ChannelType v) { return static_cast<float>(v); }
@@ -36,7 +37,7 @@ struct PixelTraits<PF_Pixel> {
 };
 
 template <>
-struct PixelTraits<PF_Pixel16> {
+struct LiteGlowPixelTraits<PF_Pixel16> {
     using ChannelType = A_u_short;
     static constexpr float MAX_VAL = 32768.0f;
     static inline float ToFloat(ChannelType v) { return static_cast<float>(v); }
@@ -44,7 +45,7 @@ struct PixelTraits<PF_Pixel16> {
 };
 
 template <>
-struct PixelTraits<PF_PixelFloat> {
+struct LiteGlowPixelTraits<PF_PixelFloat> {
     using ChannelType = PF_FpShort;
     static inline float ToFloat(ChannelType v) { return static_cast<float>(v); }
     static inline ChannelType FromFloat(float v) { return static_cast<ChannelType>(v); }
@@ -154,7 +155,7 @@ static PF_Err RenderGeneric(PF_InData* in_data, PF_OutData* out_data, PF_ParamDe
     // Parameters
     float strength = static_cast<float>(params[LITEGLOW_STRENGTH]->u.fs_d.value);
     float radius = static_cast<float>(params[LITEGLOW_RADIUS]->u.sd.value);
-    float threshold = static_cast<float>(params[LITEGLOW_THRESHOLD]->u.sd.value) * (PixelTraits<Pixel>::MAX_VAL / 255.0f);
+    float threshold = static_cast<float>(params[LITEGLOW_THRESHOLD]->u.sd.value) * (LiteGlowPixelTraits<Pixel>::MAX_VAL / 255.0f);
     int quality = params[LITEGLOW_QUALITY]->u.pd.value;
 
     if (radius < 0.1f) {
@@ -175,10 +176,10 @@ static PF_Err RenderGeneric(PF_InData* in_data, PF_OutData* out_data, PF_ParamDe
             float* buf_row = &buffer[y * width * 4];
             
             for (int x = 0; x < width; ++x) {
-                float r = PixelTraits<Pixel>::ToFloat(row[x].red);
-                float g = PixelTraits<Pixel>::ToFloat(row[x].green);
-                float b = PixelTraits<Pixel>::ToFloat(row[x].blue);
-                float a = PixelTraits<Pixel>::ToFloat(row[x].alpha);
+                float r = LiteGlowPixelTraits<Pixel>::ToFloat(row[x].red);
+                float g = LiteGlowPixelTraits<Pixel>::ToFloat(row[x].green);
+                float b = LiteGlowPixelTraits<Pixel>::ToFloat(row[x].blue);
+                float a = LiteGlowPixelTraits<Pixel>::ToFloat(row[x].alpha);
                 
                 // Luma for threshold
                 float luma = 0.2126f * r + 0.7152f * g + 0.0722f * b;
@@ -189,7 +190,7 @@ static PF_Err RenderGeneric(PF_InData* in_data, PF_OutData* out_data, PF_ParamDe
                     // Or just keep value if > threshold.
                     // "Glow" usually glows from bright parts.
                     // Let's subtract threshold.
-                    float factor = (luma - threshold) / (PixelTraits<Pixel>::MAX_VAL - threshold + 0.001f); // Normalize 0..1
+                    float factor = (luma - threshold) / (LiteGlowPixelTraits<Pixel>::MAX_VAL - threshold + 0.001f); // Normalize 0..1
                     // Scale back up? Or just keep original intensity?
                     // Usually: (Value - Threshold)
                     
@@ -197,7 +198,7 @@ static PF_Err RenderGeneric(PF_InData* in_data, PF_OutData* out_data, PF_ParamDe
                     // Or just (Color - Threshold)? Hard for RGB.
                     // Let's use: if luma > threshold, keep Color. Else 0.
                     // Smooth transition:
-                    float alpha = std::min(1.0f, (luma - threshold) / (PixelTraits<Pixel>::MAX_VAL * 0.1f)); // Soft knee
+                    float alpha = std::min(1.0f, (luma - threshold) / (LiteGlowPixelTraits<Pixel>::MAX_VAL * 0.1f)); // Soft knee
                     
                     buf_row[x * 4 + 0] = r * alpha;
                     buf_row[x * 4 + 1] = g * alpha;
@@ -319,15 +320,15 @@ static PF_Err RenderGeneric(PF_InData* in_data, PF_OutData* out_data, PF_ParamDe
                 float gg = buf_row[x * 4 + 1] * strength_norm;
                 float gb = buf_row[x * 4 + 2] * strength_norm;
                 
-                float ir = PixelTraits<Pixel>::ToFloat(in_row[x].red);
-                float ig = PixelTraits<Pixel>::ToFloat(in_row[x].green);
-                float ib = PixelTraits<Pixel>::ToFloat(in_row[x].blue);
-                float ia = PixelTraits<Pixel>::ToFloat(in_row[x].alpha);
+                float ir = LiteGlowPixelTraits<Pixel>::ToFloat(in_row[x].red);
+                float ig = LiteGlowPixelTraits<Pixel>::ToFloat(in_row[x].green);
+                float ib = LiteGlowPixelTraits<Pixel>::ToFloat(in_row[x].blue);
+                float ia = LiteGlowPixelTraits<Pixel>::ToFloat(in_row[x].alpha);
                 
                 // Additive
-                out_row[x].red = PixelTraits<Pixel>::FromFloat(ir + gr);
-                out_row[x].green = PixelTraits<Pixel>::FromFloat(ig + gg);
-                out_row[x].blue = PixelTraits<Pixel>::FromFloat(ib + gb);
+                out_row[x].red = LiteGlowPixelTraits<Pixel>::FromFloat(ir + gr);
+                out_row[x].green = LiteGlowPixelTraits<Pixel>::FromFloat(ig + gg);
+                out_row[x].blue = LiteGlowPixelTraits<Pixel>::FromFloat(ib + gb);
                 out_row[x].alpha = in_row[x].alpha; // Keep original alpha? Or add glow alpha?
                 // Usually glow adds to alpha too if background is transparent.
                 // But for now, let's just add RGB and clamp.
