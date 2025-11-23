@@ -34,6 +34,7 @@ GlobalSetup (
 										BUILD_VERSION);
 	
 	out_data->out_flags =  PF_OutFlag_DEEP_COLOR_AWARE;
+	out_data->out_flags2 = PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
 	
 	return PF_Err_NONE;
 }
@@ -121,10 +122,9 @@ Render (
 	double radius = params[LITEGLOW_RADIUS]->u.fs_d.value;
 	double threshold = params[LITEGLOW_THRESHOLD]->u.fs_d.value;
 	
-	// For now, just copy input to output to ensure it works
-	// Then add a simple brightness boost based on threshold
-	
-	PF_COPY(input, output, NULL, NULL);
+	// Copy input to output first
+	ERR(PF_COPY(input, output, NULL, NULL));
+	if (err) return err;
 	
 	// Simple iteration to add glow
 	// Note: Real glow requires convolution, which is complex to implement in one go.
