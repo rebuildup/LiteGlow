@@ -137,14 +137,17 @@ Render (
 	if (PF_WORLD_IS_DEEP(output)) {
 		// 16-bit
 		A_u_short thresh16 = (A_u_short)((threshold / 255.0) * 32768.0);
+		double strength_scaled = strength * 10.0; // Scale for 16-bit
 		for (int y = 0; y < height; y++) {
 			PF_Pixel16 *row = (PF_Pixel16*)((char*)output->data + y * rowbytes);
 			for (int x = 0; x < width; x++) {
-				// Simple logic: if pixel > threshold, boost it
-				if (row[x].green > thresh16) {
-					row[x].red = (std::min)(32768, (int)(row[x].red + strength));
-					row[x].green = (std::min)(32768, (int)(row[x].green + strength));
-					row[x].blue = (std::min)(32768, (int)(row[x].blue + strength));
+				// Calculate brightness
+				int brightness = ((int)row[x].red + (int)row[x].green + (int)row[x].blue) / 3;
+				if (brightness > thresh16) {
+					double boost = (brightness - thresh16) / 32768.0 * strength_scaled;
+					row[x].red = (std::min)(32768, (int)(row[x].red + boost));
+					row[x].green = (std::min)(32768, (int)(row[x].green + boost));
+					row[x].blue = (std::min)(32768, (int)(row[x].blue + boost));
 				}
 			}
 		}
@@ -154,10 +157,12 @@ Render (
 		for (int y = 0; y < height; y++) {
 			PF_Pixel8 *row = (PF_Pixel8*)((char*)output->data + y * rowbytes);
 			for (int x = 0; x < width; x++) {
-				if (row[x].green > thresh8) {
-					row[x].red = (std::min)(255, (int)(row[x].red + strength / 10.0));
-					row[x].green = (std::min)(255, (int)(row[x].green + strength / 10.0));
-					row[x].blue = (std::min)(255, (int)(row[x].blue + strength / 10.0));
+				int brightness = ((int)row[x].red + (int)row[x].green + (int)row[x].blue) / 3;
+				if (brightness > thresh8) {
+					double boost = (brightness - thresh8) / 255.0 * (strength / 10.0);
+					row[x].red = (std::min)(255, (int)(row[x].red + boost));
+					row[x].green = (std::min)(255, (int)(row[x].green + boost));
+					row[x].blue = (std::min)(255, (int)(row[x].blue + boost));
 				}
 			}
 		}
