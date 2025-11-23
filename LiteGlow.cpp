@@ -828,21 +828,6 @@ static PF_Err
 }
 
 static PF_Err
-SmartRender(
-    PF_InData* in_data,
-    PF_OutData* out_data,
-    void* extraP)
-{
-    PF_Err err = PF_Err_NONE;
-    PF_SmartRenderExtra_Local* extra = (PF_SmartRenderExtra_Local*)extraP;
-    PF_EffectWorld* input_world = NULL;
-    PF_EffectWorld* output_world = NULL;
-
-    ERR(extra->cb->checkout_layer_pixels(in_data->effect_ref, LITEGLOW_INPUT, &input_world));
-    ERR(extra->cb->checkout_output(in_data->effect_ref, &output_world));
-
-    if (!err) {
-        PF_PixelFormat format = PF_PixelFormat_ARGB32;
         AEGP_SuiteHandler suites(in_data->pica_basicP);
         PF_WorldSuite2* wsP = NULL;
         ERR(suites.SPBasicSuite()->AcquireSuite(kPFWorldSuite, kPFWorldSuiteVersion2, (const void**)&wsP));
