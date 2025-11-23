@@ -65,15 +65,14 @@ typedef short int            int16;
 
 enum {
     LITEGLOW_INPUT = 0,
-    LITEGLOW_STRENGTH,
-    LITEGLOW_RADIUS,
-    LITEGLOW_THRESHOLD,
-    LITEGLOW_QUALITY,
     LITEGLOW_NUM_PARAMS
 };
 
 enum {
-    STRENGTH_DISK_ID = 1
+    STRENGTH_DISK_ID = 1,
+    RADIUS_DISK_ID,
+    THRESHOLD_DISK_ID,
+    QUALITY_DISK_ID
 };
 
 typedef struct BlendData {
