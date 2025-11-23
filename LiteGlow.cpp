@@ -649,4 +649,3 @@ PF_Err EffectMain(PF_Cmd cmd,
     }
     return err;
 }
-```
