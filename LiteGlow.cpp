@@ -766,23 +766,24 @@ Render(
     PF_EffectWorld bright_world, blur_h_world, blur_v_world;
 
     // Create temporary worlds with matching bit depth
-    // WorldSuite2 automatically creates worlds with the same depth as output
-    ERR(suites.WorldSuite2()->new_world(in_data->effect_ref,
+    PF_Boolean is_16bit = PF_WORLD_IS_DEEP(output);
+
+    ERR(suites.WorldSuite1()->new_world(in_data->effect_ref,
         output->width,
         output->height,
-        FALSE,  // don't clear
+        is_16bit,
         &bright_world));
 
-    ERR(suites.WorldSuite2()->new_world(in_data->effect_ref,
+    ERR(suites.WorldSuite1()->new_world(in_data->effect_ref,
         output->width,
         output->height,
-        FALSE,
+        is_16bit,
         &blur_h_world));
 
-    ERR(suites.WorldSuite2()->new_world(in_data->effect_ref,
+    ERR(suites.WorldSuite1()->new_world(in_data->effect_ref,
         output->width,
         output->height,
-        FALSE,
+        is_16bit,
         &blur_v_world));
 
     if (!err) {
@@ -1004,9 +1005,9 @@ Render(
         }
 
         // Dispose of temporary worlds
-        ERR(suites.WorldSuite2()->dispose_world(in_data->effect_ref, &bright_world));
-        ERR(suites.WorldSuite2()->dispose_world(in_data->effect_ref, &blur_h_world));
-        ERR(suites.WorldSuite2()->dispose_world(in_data->effect_ref, &blur_v_world));
+        ERR(suites.WorldSuite1()->dispose_world(in_data->effect_ref, &bright_world));
+        ERR(suites.WorldSuite1()->dispose_world(in_data->effect_ref, &blur_h_world));
+        ERR(suites.WorldSuite1()->dispose_world(in_data->effect_ref, &blur_v_world));
     }
 
     return err;
