@@ -796,7 +796,7 @@ Render(
         gdata.resolution_factor = resolution_factor;
 
         // STEP 1: Extract bright areas with edge detection
-        if (PF_WORLD_IS_DEEP(output)) {
+        if (is_deep) {
             ERR(suites.Iterate16Suite2()->iterate(in_data,
                 0,                // progress base
                 linesL,           // progress final
@@ -874,7 +874,7 @@ Render(
             bdata.kernel = kernel;
 
             // STEP 2: Apply horizontal Gaussian blur
-            if (PF_WORLD_IS_DEEP(output)) {
+            if (is_deep) {
                 ERR(suites.Iterate16Suite2()->iterate(in_data,
                     0,                // progress base
                     linesL,           // progress final
@@ -900,7 +900,7 @@ Render(
                 bdata.input = &blur_h_world;
 
                 // STEP 3: Apply vertical Gaussian blur
-                if (PF_WORLD_IS_DEEP(output)) {
+                if (is_deep) {
                     ERR(suites.Iterate16Suite2()->iterate(in_data,
                         0,               // progress base
                         linesL,          // progress final
@@ -926,7 +926,7 @@ Render(
                     // Second horizontal blur
                     bdata.input = &blur_v_world;
 
-                    if (PF_WORLD_IS_DEEP(output)) {
+                    if (is_deep) {
                         ERR(suites.Iterate16Suite2()->iterate(in_data,
                             0,               // progress base
                             linesL,          // progress final
@@ -951,7 +951,7 @@ Render(
                         // Second vertical blur
                         bdata.input = &bright_world;
 
-                        if (PF_WORLD_IS_DEEP(output)) {
+                        if (is_deep) {
                             ERR(suites.Iterate16Suite2()->iterate(in_data,
                                 0,               // progress base
                                 linesL,          // progress final
@@ -981,7 +981,7 @@ Render(
                     blend_data.quality = quality;
                     blend_data.strength = strength;
 
-                    if (PF_WORLD_IS_DEEP(output)) {
+                    if (is_deep) {
                         ERR(suites.Iterate16Suite2()->iterate(in_data,
                             0,               // progress base
                             linesL,          // progress final
