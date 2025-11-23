@@ -606,13 +606,287 @@ PF_Err PluginDataEntryFunction2(PF_PluginDataPtr inPtr,
         "361do LiteGlow", // Match Name
         "361do_plugins", // Category
         AE_RESERVED_INFO,
+                line_b[x] = buf_row[x * 4 + 2];
+            }
+            
+            IIR_1D(line_r.data(), width, coeffs);
+            IIR_1D(line_g.data(), width, coeffs);
+            IIR_1D(line_b.data(), width, coeffs);
+            
+            // Interleave
+            for (int x = 0; x < width; ++x) {
+                buf_row[x * 4 + 0] = line_r[x];
+                buf_row[x * 4 + 1] = line_g[x];
+                buf_row[x * 4 + 2] = line_b[x];
+            }
+        }
+    };
+
+    for (int i = 0; i < num_threads; ++i) {
+        int start = i * rows_per_thread;
+        int end = std::min(start + rows_per_thread, height);
+        if (start < end) threads.emplace_back(blur_h, start, end);
+    }
+    for (auto& t : threads) t.join();
+    threads.clear();
+
+    // Vertical Pass
+    int cols_per_thread = (width + num_threads - 1) / num_threads;
+    auto blur_v = [&](int start_x, int end_x) {
+        std::vector<float> col_r(height);
+        std::vector<float> col_g(height);
+        std::vector<float> col_b(height);
+        
+        for (int x = start_x; x < end_x; ++x) {
+            // De-interleave
+            for (int y = 0; y < height; ++y) {
+                float* buf_row = &buffer[y * width * 4];
+                col_r[y] = buf_row[x * 4 + 0];
+                col_g[y] = buf_row[x * 4 + 1];
+                col_b[y] = buf_row[x * 4 + 2];
+            }
+            
+            IIR_1D(col_r.data(), height, coeffs);
+            IIR_1D(col_g.data(), height, coeffs);
+            IIR_1D(col_b.data(), height, coeffs);
+            
+            // Interleave
+            for (int y = 0; y < height; ++y) {
+                float* buf_row = &buffer[y * width * 4];
+                buf_row[x * 4 + 0] = col_r[y];
+                buf_row[x * 4 + 1] = col_g[y];
+                buf_row[x * 4 + 2] = col_b[y];
+            }
+        }
+    };
+
+    for (int i = 0; i < num_threads; ++i) {
+        int start = i * cols_per_thread;
+        int end = std::min(start + cols_per_thread, width);
+        if (start < end) threads.emplace_back(blur_v, start, end);
+    }
+    for (auto& t : threads) t.join();
+    threads.clear();
+
+    // 3. Composite
+    // Additive blend: Output = Input + Glow * Strength
+    float strength_norm = strength / 100.0f; 
+
+    auto composite_pass = [&](int start_y, int end_y) {
+        for (int y = start_y; y < end_y; ++y) {
+            Pixel* out_row = reinterpret_cast<Pixel*>(output_base + y * output_rowbytes);
+            const Pixel* in_row = reinterpret_cast<const Pixel*>(input_base + y * input_rowbytes);
+            float* buf_row = &buffer[y * width * 4];
+            
+            for (int x = 0; x < width; ++x) {
+                float gr = buf_row[x * 4 + 0] * strength_norm;
+                float gg = buf_row[x * 4 + 1] * strength_norm;
+                float gb = buf_row[x * 4 + 2] * strength_norm;
+                
+                float ir = LiteGlowPixelTraits<Pixel>::ToFloat(in_row[x].red);
+                float ig = LiteGlowPixelTraits<Pixel>::ToFloat(in_row[x].green);
+                float ib = LiteGlowPixelTraits<Pixel>::ToFloat(in_row[x].blue);
+                float ia = LiteGlowPixelTraits<Pixel>::ToFloat(in_row[x].alpha);
+                
+                // Additive
+                out_row[x].red = LiteGlowPixelTraits<Pixel>::FromFloat(ir + gr);
+                out_row[x].green = LiteGlowPixelTraits<Pixel>::FromFloat(ig + gg);
+                out_row[x].blue = LiteGlowPixelTraits<Pixel>::FromFloat(ib + gb);
+                out_row[x].alpha = in_row[x].alpha; 
+            }
+        }
+    };
+
+    for (int i = 0; i < num_threads; ++i) {
+        int start = i * rows_per_thread;
+        int end = std::min(start + rows_per_thread, height);
+        if (start < end) threads.emplace_back(composite_pass, start, end);
+    }
+    for (auto& t : threads) t.join();
+
+    return PF_Err_NONE;
+}
+
+static PF_Err Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_LayerDef* output) {
+    int bpp = (output->width > 0) ? (output->rowbytes / output->width) : 0;
+    if (bpp == sizeof(PF_PixelFloat)) {
+        return RenderGeneric<PF_PixelFloat>(in_data, out_data, params, output);
+    } else if (bpp == sizeof(PF_Pixel16)) {
+        return RenderGeneric<PF_Pixel16>(in_data, out_data, params, output);
+    } else {
+        return RenderGeneric<PF_Pixel>(in_data, out_data, params, output);
+    }
+}
+
+static PF_Err
+About(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_LayerDef* output)
+{
+    AEGP_SuiteHandler suites(in_data->pica_basicP);
+    suites.ANSICallbacksSuite1()->sprintf(out_data->return_msg,
+        "%s v%d.%d\r%s",
+        STR(StrID_Name),
+        MAJOR_VERSION,
+        MINOR_VERSION,
+        STR(StrID_Description));
+    return PF_Err_NONE;
+}
+
+static PF_Err
+GlobalSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_LayerDef* output)
+{
+    out_data->my_version = PF_VERSION(MAJOR_VERSION, MINOR_VERSION, BUG_VERSION, STAGE_VERSION, BUILD_VERSION);
+    PF_ParamDef def;
+
+    AEFX_CLR_STRUCT(def);
+
+    PF_ADD_FLOAT_SLIDERX(
+        "Strength",
+        STRENGTH_MIN,
+        STRENGTH_MAX,
+        STRENGTH_MIN,
+        STRENGTH_MAX,
+        STRENGTH_DFLT,
+        PF_Precision_TENTHS,
+        0,
+        0,
+        LITEGLOW_STRENGTH);
+
+    PF_ADD_FLOAT_SLIDERX(
+        "Radius",
+        RADIUS_MIN,
+        RADIUS_MAX,
+        RADIUS_MIN,
+        RADIUS_MAX,
+        RADIUS_DFLT,
+        PF_Precision_TENTHS,
+        0,
+        0,
+        LITEGLOW_RADIUS);
+
+    PF_ADD_FLOAT_SLIDERX(
+        "Threshold",
+        THRESHOLD_MIN,
+        THRESHOLD_MAX,
+        THRESHOLD_MIN,
+        THRESHOLD_MAX,
+        THRESHOLD_DFLT,
+        PF_Precision_INTEGER,
+        0,
+        0,
+        LITEGLOW_THRESHOLD);
+
+    PF_ADD_POPUP(
+        "Quality",
+        QUALITY_NUM_CHOICES,
+        QUALITY_DFLT,
+        "Low|Medium|High",
+        LITEGLOW_QUALITY);
+
+    out_data->num_params = LITEGLOW_NUM_PARAMS;
+    return PF_Err_NONE;
+}
+
+extern "C" DllExport
+PF_Err PluginDataEntryFunction2(PF_PluginDataPtr inPtr,
+    PF_PluginDataCB2 inPluginDataCallBackPtr,
+    SPBasicSuite * inSPBasicSuitePtr,
+    const char* inHostName,
+    const char* inHostVersion)
+{
+    PF_Err result = PF_Err_INVALID_CALLBACK;
+    result = PF_REGISTER_EFFECT_EXT2(
+        inPtr,
+        inPluginDataCallBackPtr,
+        "LiteGlow", // Name
+        "361do LiteGlow", // Match Name
+        "361do_plugins", // Category
+        AE_RESERVED_INFO,
         "EffectMain",
         "https://github.com/rebuildup/LiteGlow");
     return result;
 }
 
+static void UnionLRect(const PF_LRect *src, PF_LRect *dst) {
+    if (src->left < dst->left) dst->left = src->left;
+    if (src->top < dst->top) dst->top = src->top;
+    if (src->right > dst->right) dst->right = src->right;
+    if (src->bottom > dst->bottom) dst->bottom = src->bottom;
+}
+
+static PF_Err
+PreRender(
+    PF_InData* in_data,
+    PF_OutData* out_data,
+    void* extraP)
+{
+    PF_Err err = PF_Err_NONE;
+    PF_PreRenderExtra_Local* extra = (PF_PreRenderExtra_Local*)extraP;
+    PF_RenderRequest req = extra->input->output_request;
+    PF_CheckoutResult in_result;
+
+    req.preserve_rgb_of_zero_alpha = FALSE;
+
+    ERR(extra->cb->checkout_layer(
+        in_data->effect_ref,
+        LITEGLOW_INPUT,
+        LITEGLOW_INPUT,
+        &req,
+        in_data->current_time,
+        in_data->time_step,
+        in_data->time_scale,
+        &in_result));
+
+    UnionLRect(&in_result.result_rect, &extra->output->result_rect);
+    UnionLRect(&in_result.max_result_rect, &extra->output->max_result_rect);
+
+    return err;
+}
+
+static PF_Err
+SmartRender(
+    PF_InData* in_data,
+    PF_OutData* out_data,
+    void* extraP)
+{
+    PF_Err err = PF_Err_NONE;
+    PF_SmartRenderExtra_Local* extra = (PF_SmartRenderExtra_Local*)extraP;
+    PF_EffectWorld* input_world = NULL;
+    PF_EffectWorld* output_world = NULL;
+
+    ERR(extra->cb->checkout_layer_pixels(in_data->effect_ref, LITEGLOW_INPUT, &input_world));
+    ERR(extra->cb->checkout_output(in_data->effect_ref, &output_world));
+
+    if (!err) {
+        PF_PixelFormat format = PF_PixelFormat_ARGB32;
+        AEGP_SuiteHandler suites(in_data->pica_basicP);
+        PF_WorldSuite2* wsP = NULL;
+        ERR(suites.SPBasicSuite()->AcquireSuite(kPFWorldSuite, kPFWorldSuiteVersion2, (const void**)&wsP));
+        
+        if (!err && wsP) {
+            ERR(wsP->PF_GetPixelFormat(input_world, &format));
+            
+            if (!err) {
+                if (format == PF_PixelFormat_ARGB128) {
+                    err = Render32(in_data, out_data, NULL, output_world, 
+                        (PF_PixelFloat*)input_world->data, (PF_PixelFloat*)output_world->data);
+                } else if (format == PF_PixelFormat_ARGB64) {
+                    err = Render16(in_data, out_data, NULL, output_world, 
+                        (PF_Pixel16*)input_world->data, (PF_Pixel16*)output_world->data);
+                } else {
+                    err = Render8(in_data, out_data, NULL, output_world, 
+                        (PF_Pixel*)input_world->data, (PF_Pixel*)output_world->data);
+                }
+            }
+            suites.SPBasicSuite()->ReleaseSuite(kPFWorldSuite, kPFWorldSuiteVersion2);
+        }
+    }
+
+    return err;
+}
+
 extern "C" DllExport
-PF_Err EffectMain(PF_Cmd cmd,
+PF_Err EffectMain(
+    PF_Cmd cmd,
     PF_InData * in_data,
     PF_OutData * out_data,
     PF_ParamDef * params[],
@@ -621,5 +895,17 @@ PF_Err EffectMain(PF_Cmd cmd,
 {
     PF_Err err = PF_Err_NONE;
     try {
+        switch (cmd) {
+        case PF_Cmd_ABOUT: err = About(in_data, out_data, params, output); break;
+        case PF_Cmd_GLOBAL_SETUP: err = GlobalSetup(in_data, out_data, params, output); break;
+        case PF_Cmd_PARAMS_SETUP: err = ParamsSetup(in_data, out_data, params, output); break;
+        case PF_Cmd_SMART_PRE_RENDER: err = PreRender(in_data, out_data, extra); break;
+        case PF_Cmd_SMART_RENDER: err = SmartRender(in_data, out_data, extra); break;
+        default: break;
+        }
+    }
+    catch (...) {
+        err = PF_Err_INTERNAL_STRUCT_DAMAGED;
+    }
     return err;
 }

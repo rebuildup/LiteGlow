@@ -84,54 +84,6 @@ enum {
 };
 
 enum {
-    STRENGTH_DISK_ID = 1,
-    RADIUS_DISK_ID,
-    THRESHOLD_DISK_ID,
-    QUALITY_DISK_ID
-};
-
-// Define Smart Render structs locally to avoid missing header issues
-typedef struct PF_SmartRenderCallbacks_Local {
-    PF_Err (*checkout_layer_pixels)(PF_ProgPtr effect_ref, PF_ParamIndex index, PF_EffectWorld **pixels);
-    PF_Err (*checkout_output)(PF_ProgPtr effect_ref, PF_EffectWorld **output);
-    PF_Err (*checkin_layer_pixels)(PF_ProgPtr effect_ref, PF_ParamIndex index);
-    PF_Err (*is_layer_pixel_data_valid)(PF_ProgPtr effect_ref, PF_ParamIndex index, PF_Boolean *valid);
-} PF_SmartRenderCallbacks_Local;
-
-typedef struct PF_SmartRenderExtra_Local {
-    PF_SmartRenderCallbacks_Local *cb;
-    void *unused;
-} PF_SmartRenderExtra_Local;
-
-typedef struct PF_PreRenderInput_Local {
-    PF_RenderRequest output_request;
-    short bit_depth;
-    void *unused;
-} PF_PreRenderInput_Local;
-
-typedef struct PF_PreRenderOutput_Local {
-    PF_LRect result_rect;
-    PF_LRect max_result_rect;
-    void *unused;
-} PF_PreRenderOutput_Local;
-
-typedef struct PF_PreRenderCallbacks_Local {
-    PF_Err (*checkout_layer)(PF_ProgPtr effect_ref, PF_ParamIndex index, PF_ParamIndex req_index, const PF_RenderRequest *req, A_long current_time, A_long time_step, A_u_long time_scale, PF_CheckoutResult *result);
-    PF_Err (*checkout_layer_pixels)(PF_ProgPtr effect_ref, PF_ParamIndex index, PF_ParamIndex req_index, const PF_RenderRequest *req, A_long current_time, A_long time_step, A_u_long time_scale, PF_EffectWorld **pixels);
-} PF_PreRenderCallbacks_Local;
-
-typedef struct PF_PreRenderExtra_Local {
-    PF_PreRenderCallbacks_Local *cb;
-    PF_PreRenderInput_Local *input;
-    PF_PreRenderOutput_Local *output;
-    void *unused;
-} PF_PreRenderExtra_Local;
-
-// Sequence data for caching information between renders
-typedef struct {
-    A_long sequence_id;
-    float gaussKernel[KERNEL_SIZE_MAX * 2 + 1]; // Cached Gaussian kernel
-    float strength;
 } BlendData, * BlendDataP;
 
 extern "C" {
