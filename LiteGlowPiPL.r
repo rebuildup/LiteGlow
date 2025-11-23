@@ -35,7 +35,7 @@ resource 'PiPL' (16000) {
             PF_PLUG_IN_SUBVERS
         },
         AE_Effect_Version {
-            524289    /* 1.0.0 (RELEASE, BUILD 1) */
+            524288    /* 1.0.0 */
         },
         AE_Effect_Info_Flags {
             0
