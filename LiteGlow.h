@@ -72,6 +72,40 @@ enum {
     QUALITY_DISK_ID
 };
 
+// Structure definitions for internal processing
+typedef struct {
+    A_long sequence_id;
+    int gaussKernelSize;
+    int kernelRadius;
+    int quality;
+    float gaussKernel[128];
+} LiteGlowSequenceData;
+
+typedef struct {
+    float strength;
+    float threshold;
+    float resolution_factor;
+    PF_EffectWorld* input;
+} GlowData;
+
+typedef GlowData* GlowDataP;
+
+typedef struct {
+    PF_EffectWorld* input;
+    float* kernel;
+    int radius;
+} BlurData;
+
+typedef BlurData* BlurDataP;
+
+typedef struct {
+    PF_EffectWorld* glow;
+    int quality;
+    float strength;
+} BlendData;
+
+typedef BlendData* BlendDataP;
+
 extern "C" {
     DllExport
     PF_Err
