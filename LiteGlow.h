@@ -78,6 +78,7 @@ typedef struct {
     int gaussKernelSize;
     int kernelRadius;
     int quality;
+    float sigma;
     float gaussKernel[128];
 } LiteGlowSequenceData;
 
