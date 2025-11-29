@@ -407,10 +407,11 @@ if not exist "$(OutDir)\DirectX_Assets" mkdir "$(OutDir)\DirectX_Assets"
     <ClInclude Include="..\..\..\Util\String_Utils.h" />
     <ClInclude Include="..\LiteGlow_Strings.h" />
   </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="..\..\..\Util\AEGP_SuiteHandler.cpp" />
-    <ClCompile Include="..\..\..\Util\DirectXUtils.cpp" />
-    <ClCompile Include="..\..\..\Util\MissingSuiteError.cpp" />
+    <ItemGroup>
+      <ClCompile Include="..\..\..\Util\AEGP_SuiteHandler.cpp" />
+      <ClCompile Include="..\..\..\Util\DirectXUtils.cpp" />
+      <ClCompile Include="..\..\..\Util\Smart_Utils.cpp" />
+      <ClCompile Include="..\..\..\Util\MissingSuiteError.cpp" />
     <ClCompile Include="..\LiteGlow.cpp" />
     <ClCompile Include="..\LiteGlow_Strings.cpp" />
   </ItemGroup>
