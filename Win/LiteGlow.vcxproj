@@ -359,41 +359,25 @@ cl /D "MSWindows" /EP $(IntDir)%(Filename).rrc &gt;               "$(ProjectDir)
     <CustomBuild Include="..\LiteGlow_Kernel.chlsl">
       <FileType>Document</FileType>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">rem DirectX Shader Compiler is required (DXC_SDK_BASE_PATH)
-del /Q "$(ProjectDir)%(Filename).i" 2&gt; nul
-"cl.exe" /nologo -D GF_DEVICE_TARGET_HLSL=1 -I"$(BOOST_BASE_PATH)" -I"..\..\..\GPUUtils" /TP /P "%(FullPath)"
-python "..\..\..\GPUUtils\ParseHLSL.py" -i "$(ProjectDir)%(Filename).i" -o "$(IntDir)." -e LiteGlowKernel
 if not exist "$(OutDir)DirectX_Assets" mkdir "$(OutDir)DirectX_Assets"
-"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "$(IntDir)LiteGlowKernel.hlsl" -E main -Fo "$(OutDir)DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
+"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "%(FullPath)" -E main -Fo "$(OutDir)DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">rem DirectX Shader Compiler is required (DXC_SDK_BASE_PATH)
-del /Q "$(ProjectDir)%(Filename).i" 2&gt; nul
-"cl.exe" /nologo -D GF_DEVICE_TARGET_HLSL=1 -I"$(BOOST_BASE_PATH)" -I"..\..\..\GPUUtils" /TP /P "%(FullPath)"
-python "..\..\..\GPUUtils\ParseHLSL.py" -i "$(ProjectDir)%(Filename).i" -o "$(IntDir)." -e LiteGlowKernel
 if not exist "$(OutDir)DirectX_Assets" mkdir "$(OutDir)DirectX_Assets"
-"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "$(IntDir)LiteGlowKernel.hlsl" -E main -Fo "$(OutDir)DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
+"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "%(FullPath)" -E main -Fo "$(OutDir)DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">rem DirectX Shader Compiler is required (DXC_SDK_BASE_PATH)
-del /Q "$(ProjectDir)%(Filename).i" 2&gt; nul
-"cl.exe" /nologo -D GF_DEVICE_TARGET_HLSL=1 -I"$(BOOST_BASE_PATH)" -I"..\..\..\GPUUtils" /TP /P "%(FullPath)"
-python "..\..\..\GPUUtils\ParseHLSL.py" -i "$(ProjectDir)%(Filename).i" -o "$(IntDir)." -e LiteGlowKernel
 if not exist "$(OutDir)DirectX_Assets" mkdir "$(OutDir)DirectX_Assets"
-"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "$(IntDir)LiteGlowKernel.hlsl" -E main -Fo "$(OutDir)DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
+"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "%(FullPath)" -E main -Fo "$(OutDir)DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">rem DirectX Shader Compiler is required (DXC_SDK_BASE_PATH)
-del /Q "$(ProjectDir)%(Filename).i" 2&gt; nul
-"cl.exe" /nologo -D GF_DEVICE_TARGET_HLSL=1 -I"$(BOOST_BASE_PATH)" -I"..\..\..\GPUUtils" /TP /P "%(FullPath)"
-python "..\..\..\GPUUtils\ParseHLSL.py" -i "$(ProjectDir)%(Filename).i" -o "$(IntDir)." -e LiteGlowKernel
 if not exist "$(OutDir)DirectX_Assets" mkdir "$(OutDir)DirectX_Assets"
-"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "$(IntDir)LiteGlowKernel.hlsl" -E main -Fo "$(OutDir)DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Preprocessing HLSL to CSO/RS for LiteGlow_Kernel.chlsl</Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Preprocessing HLSL to CSO/RS for LiteGlow_Kernel.chlsl</Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Preprocessing HLSL to CSO/RS for LiteGlow_Kernel.chlsl</Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Preprocessing HLSL to CSO/RS for LiteGlow_Kernel.chlsl</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)%(Filename).i;$(IntDir)LiteGlowKernel.hlsl;$(OutDir)DirectX_Assets\LiteGlowKernel.cso;$(OutDir)DirectX_Assets\LiteGlowKernel.rs</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ProjectDir)%(Filename).i;$(IntDir)LiteGlowKernel.hlsl;$(OutDir)DirectX_Assets\LiteGlowKernel.cso;$(OutDir)DirectX_Assets\LiteGlowKernel.rs</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ProjectDir)%(Filename).i;$(IntDir)LiteGlowKernel.hlsl;$(OutDir)DirectX_Assets\LiteGlowKernel.cso;$(OutDir)DirectX_Assets\LiteGlowKernel.rs</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ProjectDir)%(Filename).i;$(IntDir)LiteGlowKernel.hlsl;$(OutDir)DirectX_Assets\LiteGlowKernel.cso;$(OutDir)DirectX_Assets\LiteGlowKernel.rs</Outputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(RelativeDir)\%(filename).cu;%(AdditionalInputs)</AdditionalInputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">%(RelativeDir)\%(filename).cu;%(AdditionalInputs)</AdditionalInputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(RelativeDir)\%(filename).cu;%(AdditionalInputs)</AdditionalInputs>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">%(RelativeDir)\%(filename).cu;%(AdditionalInputs)</AdditionalInputs>
+"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "%(FullPath)" -E main -Fo "$(OutDir)DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling LiteGlow_Kernel.chlsl with DXC</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling LiteGlow_Kernel.chlsl with DXC</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling LiteGlow_Kernel.chlsl with DXC</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling LiteGlow_Kernel.chlsl with DXC</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)DirectX_Assets\LiteGlowKernel.cso;$(OutDir)DirectX_Assets\LiteGlowKernel.rs;%(Outputs)</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)DirectX_Assets\LiteGlowKernel.cso;$(OutDir)DirectX_Assets\LiteGlowKernel.rs;%(Outputs)</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)DirectX_Assets\LiteGlowKernel.cso;$(OutDir)DirectX_Assets\LiteGlowKernel.rs;%(Outputs)</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)DirectX_Assets\LiteGlowKernel.cso;$(OutDir)DirectX_Assets\LiteGlowKernel.rs;%(Outputs)</Outputs>
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
