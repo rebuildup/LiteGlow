@@ -107,7 +107,7 @@
     </Midl>
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>../build/include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9\include;..\..\..\Headers;..\..\..\Headers\SP;..\..\..\Headers\Win;..\..\..\Resources;..\..\..\Util;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../build/include;..\..\..\Headers;..\..\..\Headers\SP;..\..\..\Headers\Win;..\..\..\Resources;..\..\..\Util;..\..\..\GPUUtils;$(BOOST_BASE_PATH)\;$(CUDA_SDK_BASE_PATH)\include\;$(IntDir)PreprocessedOpenCL;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>MSWindows;WIN32;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <StructMemberAlignment>Default</StructMemberAlignment>
@@ -146,7 +146,8 @@
       </DataExecutionPrevention>
       <ImportLibrary>$(IntDir)/$(TargetName).lib</ImportLibrary>
       <TargetMachine>MachineX64</TargetMachine>
-      <AdditionalLibraryDirectories>../build/x64/vc15/lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>../build/x64/vc15/lib;$(CUDA_SDK_BASE_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>cudart_static.lib;OpenCL.lib;d3dcompiler.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Bscmake>
       <OutputFile>$(IntDir)$(TargetName).bsc</OutputFile>
@@ -164,7 +165,7 @@
     </Midl>
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
-      <AdditionalIncludeDirectories>../build/include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9\include;..\..\..\Headers;..\..\..\Headers\SP;..\..\..\Headers\Win;..\..\..\Resources;..\..\..\Util;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../build/include;..\..\..\Headers;..\..\..\Headers\SP;..\..\..\Headers\Win;..\..\..\Resources;..\..\..\Util;..\..\..\GPUUtils;$(BOOST_BASE_PATH)\;$(CUDA_SDK_BASE_PATH)\include\;$(IntDir)PreprocessedOpenCL;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <StructMemberAlignment>Default</StructMemberAlignment>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
@@ -204,7 +205,8 @@
       </DataExecutionPrevention>
       <ImportLibrary>$(IntDir)/$(TargetName).lib</ImportLibrary>
       <TargetMachine>MachineX64</TargetMachine>
-      <AdditionalLibraryDirectories>../build/x64/vc15/lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>../build/x64/vc15/lib;$(CUDA_SDK_BASE_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>cudart_static.lib;OpenCL.lib;d3dcompiler.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Bscmake>
       <OutputFile>$(IntDir)$(TargetName).bsc</OutputFile>
@@ -222,7 +224,7 @@
     </Midl>
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>../build/include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9\include;..\..\..\Headers;..\..\..\Headers\SP;..\..\..\Headers\Win;..\..\..\Resources;..\..\..\Util;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../build/include;..\..\..\Headers;..\..\..\Headers\SP;..\..\..\Headers\Win;..\..\..\Resources;..\..\..\Util;..\..\..\GPUUtils;$(BOOST_BASE_PATH)\;$(CUDA_SDK_BASE_PATH)\include\;$(IntDir)PreprocessedOpenCL;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>MSWindows;WIN32;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <StructMemberAlignment>Default</StructMemberAlignment>
@@ -261,7 +263,8 @@
       </DataExecutionPrevention>
       <ImportLibrary>$(IntDir)/$(TargetName).lib</ImportLibrary>
       <TargetMachine>MachineX86</TargetMachine>
-      <AdditionalLibraryDirectories>../build/x64/vc15/lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>../build/x64/vc15/lib;$(CUDA_SDK_BASE_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>cudart_static.lib;OpenCL.lib;d3dcompiler.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Bscmake>
       <OutputFile>$(IntDir)$(TargetName).bsc</OutputFile>
@@ -279,7 +282,7 @@
     </Midl>
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
-      <AdditionalIncludeDirectories>../build/include;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9\include;..\..\..\Headers;..\..\..\Headers\SP;..\..\..\Headers\Win;..\..\..\Resources;..\..\..\Util;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../build/include;..\..\..\Headers;..\..\..\Headers\SP;..\..\..\Headers\Win;..\..\..\Resources;..\..\..\Util;..\..\..\GPUUtils;$(BOOST_BASE_PATH)\;$(CUDA_SDK_BASE_PATH)\include\;$(IntDir)PreprocessedOpenCL;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <StructMemberAlignment>Default</StructMemberAlignment>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
@@ -319,7 +322,8 @@
       </DataExecutionPrevention>
       <ImportLibrary>$(IntDir)/$(TargetName).lib</ImportLibrary>
       <TargetMachine>MachineX86</TargetMachine>
-      <AdditionalLibraryDirectories>../build/x64/vc15/lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>../build/x64/vc15/lib;$(CUDA_SDK_BASE_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>cudart_static.lib;OpenCL.lib;d3dcompiler.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Bscmake>
       <OutputFile>$(IntDir)$(TargetName).bsc</OutputFile>
@@ -352,6 +356,45 @@ cl /D "MSWindows" /EP $(IntDir)%(Filename).rrc &gt;               "$(ProjectDir)
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)%(Filename).rc;%(Outputs)</Outputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ProjectDir)%(Filename).rc;%(Outputs)</Outputs>
     </CustomBuild>
+    <CustomBuild Include="..\LiteGlow_Kernel.chlsl">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">rem DirectX Shader Compiler is required (DXC_SDK_BASE_PATH)
+del /Q "$(ProjectDir)%(Filename).i" 2&gt; nul
+"cl.exe" /nologo -D GF_DEVICE_TARGET_HLSL=1 -I"$(BOOST_BASE_PATH)" -I"..\..\..\GPUUtils" /TP /P "%(FullPath)"
+python "..\..\..\GPUUtils\ParseHLSL.py" -i "$(ProjectDir)%(Filename).i" -o "$(IntDir)." -e LiteGlowKernel
+if not exist "$(OutDir)DirectX_Assets" mkdir "$(OutDir)DirectX_Assets"
+"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "$(IntDir)LiteGlowKernel.hlsl" -E main -Fo "$(OutDir)DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">rem DirectX Shader Compiler is required (DXC_SDK_BASE_PATH)
+del /Q "$(ProjectDir)%(Filename).i" 2&gt; nul
+"cl.exe" /nologo -D GF_DEVICE_TARGET_HLSL=1 -I"$(BOOST_BASE_PATH)" -I"..\..\..\GPUUtils" /TP /P "%(FullPath)"
+python "..\..\..\GPUUtils\ParseHLSL.py" -i "$(ProjectDir)%(Filename).i" -o "$(IntDir)." -e LiteGlowKernel
+if not exist "$(OutDir)DirectX_Assets" mkdir "$(OutDir)DirectX_Assets"
+"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "$(IntDir)LiteGlowKernel.hlsl" -E main -Fo "$(OutDir)DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">rem DirectX Shader Compiler is required (DXC_SDK_BASE_PATH)
+del /Q "$(ProjectDir)%(Filename).i" 2&gt; nul
+"cl.exe" /nologo -D GF_DEVICE_TARGET_HLSL=1 -I"$(BOOST_BASE_PATH)" -I"..\..\..\GPUUtils" /TP /P "%(FullPath)"
+python "..\..\..\GPUUtils\ParseHLSL.py" -i "$(ProjectDir)%(Filename).i" -o "$(IntDir)." -e LiteGlowKernel
+if not exist "$(OutDir)DirectX_Assets" mkdir "$(OutDir)DirectX_Assets"
+"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "$(IntDir)LiteGlowKernel.hlsl" -E main -Fo "$(OutDir)DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">rem DirectX Shader Compiler is required (DXC_SDK_BASE_PATH)
+del /Q "$(ProjectDir)%(Filename).i" 2&gt; nul
+"cl.exe" /nologo -D GF_DEVICE_TARGET_HLSL=1 -I"$(BOOST_BASE_PATH)" -I"..\..\..\GPUUtils" /TP /P "%(FullPath)"
+python "..\..\..\GPUUtils\ParseHLSL.py" -i "$(ProjectDir)%(Filename).i" -o "$(IntDir)." -e LiteGlowKernel
+if not exist "$(OutDir)DirectX_Assets" mkdir "$(OutDir)DirectX_Assets"
+"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "$(IntDir)LiteGlowKernel.hlsl" -E main -Fo "$(OutDir)DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Preprocessing HLSL to CSO/RS for LiteGlow_Kernel.chlsl</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Preprocessing HLSL to CSO/RS for LiteGlow_Kernel.chlsl</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Preprocessing HLSL to CSO/RS for LiteGlow_Kernel.chlsl</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Preprocessing HLSL to CSO/RS for LiteGlow_Kernel.chlsl</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)%(Filename).i;$(IntDir)LiteGlowKernel.hlsl;$(OutDir)DirectX_Assets\LiteGlowKernel.cso;$(OutDir)DirectX_Assets\LiteGlowKernel.rs</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(ProjectDir)%(Filename).i;$(IntDir)LiteGlowKernel.hlsl;$(OutDir)DirectX_Assets\LiteGlowKernel.cso;$(OutDir)DirectX_Assets\LiteGlowKernel.rs</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ProjectDir)%(Filename).i;$(IntDir)LiteGlowKernel.hlsl;$(OutDir)DirectX_Assets\LiteGlowKernel.cso;$(OutDir)DirectX_Assets\LiteGlowKernel.rs</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(ProjectDir)%(Filename).i;$(IntDir)LiteGlowKernel.hlsl;$(OutDir)DirectX_Assets\LiteGlowKernel.cso;$(OutDir)DirectX_Assets\LiteGlowKernel.rs</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(RelativeDir)\%(filename).cu;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">%(RelativeDir)\%(filename).cu;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(RelativeDir)\%(filename).cu;%(AdditionalInputs)</AdditionalInputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">%(RelativeDir)\%(filename).cu;%(AdditionalInputs)</AdditionalInputs>
+    </CustomBuild>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="LiteGlowPiPL.rc" />
@@ -372,6 +415,7 @@ cl /D "MSWindows" /EP $(IntDir)%(Filename).rrc &gt;               "$(ProjectDir)
     <ClInclude Include="..\..\..\Headers\AE_Macros.h" />
     <ClInclude Include="..\..\..\Util\AEFX_ChannelDepthTpl.h" />
     <ClInclude Include="..\..\..\Util\AEGP_SuiteHandler.h" />
+    <ClInclude Include="..\..\..\Util\DirectXUtils.h" />
     <ClInclude Include="..\..\..\Util\entry.h" />
     <ClInclude Include="..\..\..\Headers\FIEL_Public.h" />
     <ClInclude Include="..\..\..\Util\Param_Utils.h" />
@@ -381,6 +425,7 @@ cl /D "MSWindows" /EP $(IntDir)%(Filename).rrc &gt;               "$(ProjectDir)
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\..\Util\AEGP_SuiteHandler.cpp" />
+    <ClCompile Include="..\..\..\Util\DirectXUtils.cpp" />
     <ClCompile Include="..\..\..\Util\MissingSuiteError.cpp" />
     <ClCompile Include="..\LiteGlow.cpp" />
     <ClCompile Include="..\LiteGlow_Strings.cpp" />

@@ -1,9 +1,69 @@
 #include "LiteGlow.h"
+#include "AEFX_SuiteHelper.h"
+#include "AE_EffectGPUSuites.h"
+#include "PrSDKAESupport.h"
+
+#ifdef AE_OS_WIN
+    #include "DirectXUtils.h"
+#endif
+
 #include <math.h>
 
 // Constants for Gaussian kernel generation
 #define PI 3.14159265358979323846
 #define KERNEL_SIZE_MAX 64
+
+#ifdef AE_OS_WIN
+    #define HAS_HLSL 1
+#else
+    #define HAS_HLSL 0
+#endif
+#define HAS_METAL 0
+
+// Parameters cached during pre-render for both CPU and GPU paths.
+typedef struct
+{
+    float strength;           // slider value (0 - STRENGTH_MAX)
+    float radius;             // in pixels
+    float threshold;          // 0.0 - 1.0 normalized
+    int   quality;            // QUALITY_* enum
+    float resolution_factor;  // preview / downsample factor
+} LiteGlowRenderParams;
+
+#if HAS_HLSL
+// DirectX GPU data cached per device
+struct LiteGlowDirectXGPUData
+{
+    DXContextPtr    context;
+    ShaderObjectPtr glowShader;
+};
+
+// GPU constant buffer layout – must match LiteGlowKernel parameters.
+typedef struct
+{
+    int   srcPitch;
+    int   dstPitch;
+    int   is16f;
+    int   width;
+    int   height;
+    float strength;
+    float threshold;
+    float radius;
+    int   quality;
+} LiteGlowGPUParams;
+
+inline PF_Err DXErr(bool success)
+{
+    return success ? PF_Err_NONE : PF_Err_INTERNAL_STRUCT_DAMAGED;
+}
+#define DX_ERR(FUNC) ERR(DXErr(FUNC))
+
+static size_t
+DivideRoundUpSizeT(size_t value, size_t multiple)
+{
+    return value ? (value + multiple - 1) / multiple : 0;
+}
+#endif // HAS_HLSL
 
 // Sequence data counter
 static A_long gSequenceCount = 0;
@@ -33,19 +93,43 @@ GlobalSetup(
     PF_ParamDef* params[],
     PF_LayerDef* output)
 {
-    out_data->my_version = PF_VERSION(MAJOR_VERSION,
+    out_data->my_version = PF_VERSION(
+        MAJOR_VERSION,
         MINOR_VERSION,
         BUG_VERSION,
         STAGE_VERSION,
         BUILD_VERSION);
 
-    // Set up flags for optimizations
-    out_data->out_flags = PF_OutFlag_DEEP_COLOR_AWARE;  // 16bpc support
-    out_data->out_flags |= PF_OutFlag_PIX_INDEPENDENT;  // Enable parallel processing
-    out_data->out_flags |= PF_OutFlag_SEND_UPDATE_PARAMS_UI; // Update UI during processing
+    // Basic flags: deep color, pixel independence, UI updates.
+    out_data->out_flags = PF_OutFlag_DEEP_COLOR_AWARE |
+        PF_OutFlag_PIX_INDEPENDENT |
+        PF_OutFlag_SEND_UPDATE_PARAMS_UI;
 
-    // Enable Multi-Frame Rendering support if available
-    out_data->out_flags2 = PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
+    // Smart Render + threaded rendering.
+    out_data->out_flags2 = PF_OutFlag2_SUPPORTS_SMART_RENDER |
+        PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
+
+    // GPU support: Premiere uses pixel format suite, AE uses GPU flags directly.
+    if (in_data->appl_id == 'PrMr') {
+        AEFX_SuiteScoper<PF_PixelFormatSuite1> pixelFormatSuite(
+            in_data,
+            kPFPixelFormatSuite,
+            kPFPixelFormatSuiteVersion1,
+            out_data);
+
+        if (pixelFormatSuite.IsValid()) {
+            (*pixelFormatSuite->ClearSupportedPixelFormats)(in_data->effect_ref);
+            (*pixelFormatSuite->AddSupportedPixelFormat)(
+                in_data->effect_ref,
+                PrPixelFormat_VUYA_4444_32f);
+        }
+    }
+#if HAS_HLSL
+    else {
+        out_data->out_flags2 |= PF_OutFlag2_SUPPORTS_GPU_RENDER_F32 |
+            PF_OutFlag2_SUPPORTS_DIRECTX_RENDERING;
+    }
+#endif
 
     return PF_Err_NONE;
 }
@@ -726,34 +810,35 @@ BlendGlow16(
     return PF_Err_NONE;
 }
 
+// Core CPU processing used by both the legacy PF_Cmd_RENDER path and Smart Render.
 static PF_Err
-Render(
+LiteGlowProcess(
     PF_InData* in_data,
     PF_OutData* out_data,
-    PF_ParamDef* params[],
-    PF_LayerDef* output)
+    PF_EffectWorld* inputW,
+    PF_EffectWorld* outputW,
+    const LiteGlowRenderParams* rp)
 {
+    if (!inputW || !outputW || !rp) {
+        return PF_Err_INTERNAL_STRUCT_DAMAGED;
+    }
+
     PF_Err err = PF_Err_NONE;
     AEGP_SuiteHandler suites(in_data->pica_basicP);
-    A_long linesL = output->height;
-    PF_LayerDef* inputP = &params[LITEGLOW_INPUT]->u.ld;
+    A_long linesL = outputW->height;
+
+    const float strength = rp->strength;
 
     // If strength is zero (or near zero), just copy the input to output
-    float strength = params[LITEGLOW_STRENGTH]->u.fs_d.value;
     if (strength <= 0.1f) {
-        err = PF_COPY(inputP, output, NULL, NULL);
+        err = PF_COPY(inputW, outputW, NULL, NULL);
         return err;
     }
 
-    // Get user parameters
-    float radius_param = params[LITEGLOW_RADIUS]->u.fs_d.value;
-    float threshold = params[LITEGLOW_THRESHOLD]->u.fs_d.value;
-    int quality = params[LITEGLOW_QUALITY]->u.pd.value;
-
-    // Handle downsampling for preview
-    float downscale_x = static_cast<float>(in_data->downsample_x.den) / static_cast<float>(in_data->downsample_x.num);
-    float downscale_y = static_cast<float>(in_data->downsample_y.den) / static_cast<float>(in_data->downsample_y.num);
-    float resolution_factor = MIN(downscale_x, downscale_y);
+    float radius_param = rp->radius;
+    const float threshold_norm = rp->threshold; // already 0..1
+    const int quality = rp->quality;
+    const float resolution_factor = rp->resolution_factor;
 
     // Adjust radius based on downsampling
     float adjusted_radius = radius_param;
@@ -767,23 +852,26 @@ Render(
 
     // Create temporary worlds with matching bit depth
     // Use output's depth to ensure consistency
-    PF_Boolean is_deep = PF_WORLD_IS_DEEP(output);
-    
-    ERR(suites.WorldSuite1()->new_world(in_data->effect_ref,
-        output->width,
-        output->height,
+    PF_Boolean is_deep = PF_WORLD_IS_DEEP(outputW);
+
+    ERR(suites.WorldSuite1()->new_world(
+        in_data->effect_ref,
+        outputW->width,
+        outputW->height,
         is_deep,
         &bright_world));
 
-    ERR(suites.WorldSuite1()->new_world(in_data->effect_ref,
-        output->width,
-        output->height,
+    ERR(suites.WorldSuite1()->new_world(
+        in_data->effect_ref,
+        outputW->width,
+        outputW->height,
         is_deep,
         &blur_h_world));
 
-    ERR(suites.WorldSuite1()->new_world(in_data->effect_ref,
-        output->width,
-        output->height,
+    ERR(suites.WorldSuite1()->new_world(
+        in_data->effect_ref,
+        outputW->width,
+        outputW->height,
         is_deep,
         &blur_v_world));
 
@@ -791,26 +879,28 @@ Render(
         // Create glow parameters
         GlowData gdata;
         gdata.strength = strength;
-        gdata.threshold = threshold;
-        gdata.input = inputP;
+        gdata.threshold = threshold_norm * 255.0f; // ExtractBrightAreas expects 0-255 scale
+        gdata.input = inputW;
         gdata.resolution_factor = resolution_factor;
 
         // STEP 1: Extract bright areas with edge detection
         if (is_deep) {
-            ERR(suites.Iterate16Suite2()->iterate(in_data,
+            ERR(suites.Iterate16Suite2()->iterate(
+                in_data,
                 0,                // progress base
                 linesL,           // progress final
-                inputP,           // src 
+                inputW,           // src 
                 NULL,             // area - null for all pixels
                 (void*)&gdata,    // refcon with parameters
                 ExtractBrightAreas16, // pixel function
                 &bright_world));  // destination
         }
         else {
-            ERR(suites.Iterate8Suite2()->iterate(in_data,
+            ERR(suites.Iterate8Suite2()->iterate(
+                in_data,
                 0,                // progress base
                 linesL,           // progress final
-                inputP,           // src 
+                inputW,           // src 
                 NULL,             // area - null for all pixels
                 (void*)&gdata,    // refcon with parameters
                 ExtractBrightAreas8,  // pixel function
@@ -875,7 +965,8 @@ Render(
 
             // STEP 2: Apply horizontal Gaussian blur
             if (is_deep) {
-                ERR(suites.Iterate16Suite2()->iterate(in_data,
+                ERR(suites.Iterate16Suite2()->iterate(
+                    in_data,
                     0,                // progress base
                     linesL,           // progress final
                     &bright_world,    // src 
@@ -885,7 +976,8 @@ Render(
                     &blur_h_world));  // destination
             }
             else {
-                ERR(suites.Iterate8Suite2()->iterate(in_data,
+                ERR(suites.Iterate8Suite2()->iterate(
+                    in_data,
                     0,                // progress base
                     linesL,           // progress final
                     &bright_world,    // src 
@@ -901,7 +993,8 @@ Render(
 
                 // STEP 3: Apply vertical Gaussian blur
                 if (is_deep) {
-                    ERR(suites.Iterate16Suite2()->iterate(in_data,
+                    ERR(suites.Iterate16Suite2()->iterate(
+                        in_data,
                         0,               // progress base
                         linesL,          // progress final
                         &blur_h_world,   // src 
@@ -911,7 +1004,8 @@ Render(
                         &blur_v_world)); // destination
                 }
                 else {
-                    ERR(suites.Iterate8Suite2()->iterate(in_data,
+                    ERR(suites.Iterate8Suite2()->iterate(
+                        in_data,
                         0,               // progress base
                         linesL,          // progress final
                         &blur_h_world,   // src 
@@ -927,7 +1021,8 @@ Render(
                     bdata.input = &blur_v_world;
 
                     if (is_deep) {
-                        ERR(suites.Iterate16Suite2()->iterate(in_data,
+                        ERR(suites.Iterate16Suite2()->iterate(
+                            in_data,
                             0,               // progress base
                             linesL,          // progress final
                             &blur_v_world,   // src 
@@ -937,7 +1032,8 @@ Render(
                             &bright_world)); // destination (reuse)
                     }
                     else {
-                        ERR(suites.Iterate8Suite2()->iterate(in_data,
+                        ERR(suites.Iterate8Suite2()->iterate(
+                            in_data,
                             0,               // progress base
                             linesL,          // progress final
                             &blur_v_world,   // src 
@@ -952,7 +1048,8 @@ Render(
                         bdata.input = &bright_world;
 
                         if (is_deep) {
-                            ERR(suites.Iterate16Suite2()->iterate(in_data,
+                            ERR(suites.Iterate16Suite2()->iterate(
+                                in_data,
                                 0,               // progress base
                                 linesL,          // progress final
                                 &bright_world,   // src 
@@ -962,7 +1059,8 @@ Render(
                                 &blur_v_world)); // destination
                         }
                         else {
-                            ERR(suites.Iterate8Suite2()->iterate(in_data,
+                            ERR(suites.Iterate8Suite2()->iterate(
+                                in_data,
                                 0,               // progress base
                                 linesL,          // progress final
                                 &bright_world,   // src 
@@ -982,24 +1080,26 @@ Render(
                     blend_data.strength = strength;
 
                     if (is_deep) {
-                        ERR(suites.Iterate16Suite2()->iterate(in_data,
+                        ERR(suites.Iterate16Suite2()->iterate(
+                            in_data,
                             0,               // progress base
                             linesL,          // progress final
-                            inputP,          // src (original)
+                            inputW,          // src (original)
                             NULL,            // area - null for all pixels
                             (void*)&blend_data, // refcon - blend parameters
                             BlendGlow16,     // pixel function
-                            output));        // destination
+                            outputW));       // destination
                     }
                     else {
-                        ERR(suites.Iterate8Suite2()->iterate(in_data,
+                        ERR(suites.Iterate8Suite2()->iterate(
+                            in_data,
                             0,               // progress base
                             linesL,          // progress final
-                            inputP,          // src (original)
+                            inputW,          // src (original)
                             NULL,            // area - null for all pixels
                             (void*)&blend_data, // refcon - blend parameters
                             BlendGlow8,      // pixel function
-                            output));        // destination
+                            outputW));       // destination
                     }
                 }
             }
@@ -1012,6 +1112,381 @@ Render(
     }
 
     return err;
+}
+
+// GPU device setup / teardown
+#if HAS_HLSL
+static PF_Err
+GPUDeviceSetup(
+    PF_InData* in_data,
+    PF_OutData* out_data,
+    PF_GPUDeviceSetupExtra* extraP)
+{
+    PF_Err err = PF_Err_NONE;
+
+    AEFX_SuiteScoper<PF_HandleSuite1> handle_suite(
+        in_data,
+        kPFHandleSuite,
+        kPFHandleSuiteVersion1,
+        out_data);
+
+    AEFX_SuiteScoper<PF_GPUDeviceSuite1> gpuDeviceSuite(
+        in_data,
+        kPFGPUDeviceSuite,
+        kPFGPUDeviceSuiteVersion1,
+        out_data);
+
+    PF_GPUDeviceInfo device_info;
+    AEFX_CLR_STRUCT(device_info);
+
+    ERR(gpuDeviceSuite->GetDeviceInfo(
+        in_data->effect_ref,
+        extraP->input->device_index,
+        &device_info));
+
+    if (extraP->input->what_gpu == PF_GPU_Framework_DIRECTX) {
+        PF_Handle gpu_dataH = handle_suite->host_new_handle(sizeof(LiteGlowDirectXGPUData));
+        if (!gpu_dataH) {
+            return PF_Err_OUT_OF_MEMORY;
+        }
+
+        LiteGlowDirectXGPUData* dx_gpu_data =
+            reinterpret_cast<LiteGlowDirectXGPUData*>(*gpu_dataH);
+        memset(dx_gpu_data, 0, sizeof(LiteGlowDirectXGPUData));
+
+        dx_gpu_data->context = std::make_shared<DXContext>();
+        dx_gpu_data->glowShader = std::make_shared<ShaderObject>();
+
+        DX_ERR(dx_gpu_data->context->Initialize(
+            (ID3D12Device*)device_info.devicePV,
+            (ID3D12CommandQueue*)device_info.command_queuePV));
+
+        std::wstring csoPath, sigPath;
+        DX_ERR(GetShaderPath(L"LiteGlowKernel", csoPath, sigPath));
+        DX_ERR(dx_gpu_data->context->LoadShader(
+            csoPath.c_str(),
+            sigPath.c_str(),
+            dx_gpu_data->glowShader));
+
+        extraP->output->gpu_data = gpu_dataH;
+        out_data->out_flags2 |= PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
+    }
+
+    return err;
+}
+
+static PF_Err
+GPUDeviceSetdown(
+    PF_InData* in_data,
+    PF_OutData* out_data,
+    PF_GPUDeviceSetdownExtra* extraP)
+{
+    PF_Err err = PF_Err_NONE;
+
+    if (extraP->input->what_gpu == PF_GPU_Framework_DIRECTX) {
+        PF_Handle gpu_dataH = (PF_Handle)extraP->input->gpu_data;
+        LiteGlowDirectXGPUData* dx_gpu_data =
+            reinterpret_cast<LiteGlowDirectXGPUData*>(*gpu_dataH);
+
+        dx_gpu_data->context.reset();
+        dx_gpu_data->glowShader.reset();
+
+        AEFX_SuiteScoper<PF_HandleSuite1> handle_suite(
+            in_data,
+            kPFHandleSuite,
+            kPFHandleSuiteVersion1,
+            out_data);
+
+        handle_suite->host_dispose_handle(gpu_dataH);
+    }
+
+    return err;
+}
+#else
+static PF_Err
+GPUDeviceSetup(
+    PF_InData* /*in_data*/,
+    PF_OutData* /*out_data*/,
+    PF_GPUDeviceSetupExtra* /*extraP*/)
+{
+    return PF_Err_NONE;
+}
+
+static PF_Err
+GPUDeviceSetdown(
+    PF_InData* /*in_data*/,
+    PF_OutData* /*out_data*/,
+    PF_GPUDeviceSetdownExtra* /*extraP*/)
+{
+    return PF_Err_NONE;
+}
+#endif
+
+// CPU Smart Render entry point – delegates to the shared CPU pipeline.
+static PF_Err
+SmartRenderCPU(
+    PF_InData* in_data,
+    PF_OutData* out_data,
+    PF_PixelFormat /*pixel_format*/,
+    PF_EffectWorld* input_worldP,
+    PF_EffectWorld* output_worldP,
+    PF_SmartRenderExtra* /*extraP*/,
+    LiteGlowRenderParams* params)
+{
+    return LiteGlowProcess(in_data, out_data, input_worldP, output_worldP, params);
+}
+
+#if HAS_HLSL
+// GPU Smart Render using DirectX compute shader.
+static PF_Err
+SmartRenderGPU(
+    PF_InData* in_data,
+    PF_OutData* out_data,
+    PF_PixelFormat pixel_format,
+    PF_EffectWorld* input_worldP,
+    PF_EffectWorld* output_worldP,
+    PF_SmartRenderExtra* extraP,
+    LiteGlowRenderParams* params)
+{
+    PF_Err err = PF_Err_NONE;
+
+    AEFX_SuiteScoper<PF_GPUDeviceSuite1> gpu_suite(
+        in_data,
+        kPFGPUDeviceSuite,
+        kPFGPUDeviceSuiteVersion1,
+        out_data);
+
+    if (pixel_format != PF_PixelFormat_GPU_BGRA128) {
+        // Fall back to CPU if GPU format is not what we expect.
+        return LiteGlowProcess(in_data, out_data, input_worldP, output_worldP, params);
+    }
+
+    PF_GPUDeviceInfo device_info;
+    ERR(gpu_suite->GetDeviceInfo(
+        in_data->effect_ref,
+        extraP->input->device_index,
+        &device_info));
+
+    void* src_mem = nullptr;
+    ERR(gpu_suite->GetGPUWorldData(in_data->effect_ref, input_worldP, &src_mem));
+
+    void* dst_mem = nullptr;
+    ERR(gpu_suite->GetGPUWorldData(in_data->effect_ref, output_worldP, &dst_mem));
+
+    LiteGlowGPUParams gpuParams{};
+    gpuParams.width = input_worldP->width;
+    gpuParams.height = input_worldP->height;
+
+    const A_long bytes_per_pixel = 16; // BGRA128
+    A_long src_row_bytes = input_worldP->rowbytes;
+    A_long dst_row_bytes = output_worldP->rowbytes;
+
+    gpuParams.srcPitch = (int)(src_row_bytes / bytes_per_pixel);
+    gpuParams.dstPitch = (int)(dst_row_bytes / bytes_per_pixel);
+    gpuParams.is16f = 0; // full float
+
+    // Convert effect parameters from pre-render cache
+    gpuParams.strength = params->strength / (float)STRENGTH_MAX;
+    gpuParams.threshold = params->threshold; // already 0..1
+    gpuParams.radius = params->radius;
+    gpuParams.quality = params->quality;
+
+    if (!err && extraP->input->what_gpu == PF_GPU_Framework_DIRECTX) {
+        PF_Handle gpu_dataH = (PF_Handle)extraP->input->gpu_data;
+        LiteGlowDirectXGPUData* dx_gpu_data =
+            reinterpret_cast<LiteGlowDirectXGPUData*>(*gpu_dataH);
+
+        DXShaderExecution shaderExecution(
+            dx_gpu_data->context,
+            dx_gpu_data->glowShader,
+            3); // CBV + UAV + SRV
+
+        DX_ERR(shaderExecution.SetParamBuffer(&gpuParams, sizeof(LiteGlowGPUParams)));
+        DX_ERR(shaderExecution.SetUnorderedAccessView(
+            (ID3D12Resource*)dst_mem,
+            (UINT)(gpuParams.height * dst_row_bytes)));
+        DX_ERR(shaderExecution.SetShaderResourceView(
+            (ID3D12Resource*)src_mem,
+            (UINT)(gpuParams.height * src_row_bytes)));
+
+        DX_ERR(shaderExecution.Execute(
+            (UINT)DivideRoundUpSizeT((size_t)gpuParams.width, 16),
+            (UINT)DivideRoundUpSizeT((size_t)gpuParams.height, 16)));
+    }
+    else {
+        // Unsupported GPU framework – fall back to CPU implementation.
+        err = LiteGlowProcess(in_data, out_data, input_worldP, output_worldP, params);
+    }
+
+    return err;
+}
+#else
+// No GPU support compiled in – always fall back to CPU.
+static PF_Err
+SmartRenderGPU(
+    PF_InData* in_data,
+    PF_OutData* out_data,
+    PF_PixelFormat /*pixel_format*/,
+    PF_EffectWorld* input_worldP,
+    PF_EffectWorld* output_worldP,
+    PF_SmartRenderExtra* /*extraP*/,
+    LiteGlowRenderParams* params)
+{
+    return LiteGlowProcess(in_data, out_data, input_worldP, output_worldP, params);
+}
+#endif
+
+// PreRender data cleanup
+static void
+DisposePreRenderData(void* pre_render_dataPV)
+{
+    if (pre_render_dataPV) {
+        LiteGlowRenderParams* params = reinterpret_cast<LiteGlowRenderParams*>(pre_render_dataPV);
+        free(params);
+    }
+}
+
+// Smart PreRender – cache parameters and declare GPU render possibility.
+static PF_Err
+PreRender(
+    PF_InData* in_data,
+    PF_OutData* out_data,
+    PF_PreRenderExtra* extraP)
+{
+    PF_Err err = PF_Err_NONE;
+    PF_CheckoutResult in_result;
+    PF_RenderRequest req = extraP->input->output_request;
+
+    extraP->output->flags |= PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
+
+    LiteGlowRenderParams* infoP = reinterpret_cast<LiteGlowRenderParams*>(
+        malloc(sizeof(LiteGlowRenderParams)));
+
+    if (!infoP) {
+        return PF_Err_OUT_OF_MEMORY;
+    }
+
+    // Query parameters at pre-render time
+    PF_ParamDef cur_param;
+
+    AEFX_CLR_STRUCT(cur_param);
+    ERR(PF_CHECKOUT_PARAM(in_data, LITEGLOW_STRENGTH,
+        in_data->current_time, in_data->time_step, in_data->time_scale, &cur_param));
+    infoP->strength = cur_param.u.fs_d.value;
+
+    AEFX_CLR_STRUCT(cur_param);
+    ERR(PF_CHECKOUT_PARAM(in_data, LITEGLOW_RADIUS,
+        in_data->current_time, in_data->time_step, in_data->time_scale, &cur_param));
+    infoP->radius = cur_param.u.fs_d.value;
+
+    AEFX_CLR_STRUCT(cur_param);
+    ERR(PF_CHECKOUT_PARAM(in_data, LITEGLOW_THRESHOLD,
+        in_data->current_time, in_data->time_step, in_data->time_scale, &cur_param));
+    infoP->threshold = cur_param.u.fs_d.value / 255.0f;
+
+    AEFX_CLR_STRUCT(cur_param);
+    ERR(PF_CHECKOUT_PARAM(in_data, LITEGLOW_QUALITY,
+        in_data->current_time, in_data->time_step, in_data->time_scale, &cur_param));
+    infoP->quality = cur_param.u.pd.value;
+
+    // Downsample info
+    float downscale_x = static_cast<float>(in_data->downsample_x.den) / static_cast<float>(in_data->downsample_x.num);
+    float downscale_y = static_cast<float>(in_data->downsample_y.den) / static_cast<float>(in_data->downsample_y.num);
+    infoP->resolution_factor = MIN(downscale_x, downscale_y);
+
+    extraP->output->pre_render_data = infoP;
+    extraP->output->delete_pre_render_data_func = DisposePreRenderData;
+
+    // Checkout input to compute result rectangles
+    ERR(extraP->cb->checkout_layer(
+        in_data->effect_ref,
+        LITEGLOW_INPUT,
+        LITEGLOW_INPUT,
+        &req,
+        in_data->current_time,
+        in_data->time_step,
+        in_data->time_scale,
+        &in_result));
+
+    UnionLRect(&in_result.result_rect, &extraP->output->result_rect);
+    UnionLRect(&in_result.max_result_rect, &extraP->output->max_result_rect);
+
+    return err;
+}
+
+// Smart Render dispatcher – chooses CPU or GPU path.
+static PF_Err
+SmartRender(
+    PF_InData* in_data,
+    PF_OutData* out_data,
+    PF_SmartRenderExtra* extraP,
+    bool isGPU)
+{
+    PF_Err err = PF_Err_NONE, err2 = PF_Err_NONE;
+
+    PF_EffectWorld* input_worldP = nullptr;
+    PF_EffectWorld* output_worldP = nullptr;
+
+    LiteGlowRenderParams* infoP =
+        reinterpret_cast<LiteGlowRenderParams*>(extraP->input->pre_render_data);
+
+    if (!infoP) {
+        return PF_Err_INTERNAL_STRUCT_DAMAGED;
+    }
+
+    ERR(extraP->cb->checkout_layer_pixels(
+        in_data->effect_ref, LITEGLOW_INPUT, &input_worldP));
+    ERR(extraP->cb->checkout_output(
+        in_data->effect_ref, &output_worldP));
+
+    if (!err) {
+        AEFX_SuiteScoper<PF_WorldSuite2> world_suite(
+            in_data,
+            kPFWorldSuite,
+            kPFWorldSuiteVersion2,
+            out_data);
+
+        PF_PixelFormat pixel_format = PF_PixelFormat_INVALID;
+        ERR(world_suite->PF_GetPixelFormat(input_worldP, &pixel_format));
+
+        if (!err) {
+            if (isGPU) {
+                ERR(SmartRenderGPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, infoP));
+            }
+            else {
+                ERR(SmartRenderCPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, infoP));
+            }
+        }
+    }
+
+    err2 = extraP->cb->checkin_layer_pixels(in_data->effect_ref, LITEGLOW_INPUT);
+    return err;
+}
+
+static PF_Err
+Render(
+    PF_InData* in_data,
+    PF_OutData* out_data,
+    PF_ParamDef* params[],
+    PF_LayerDef* output)
+{
+    LiteGlowRenderParams rp;
+
+    // Get user parameters
+    rp.strength = params[LITEGLOW_STRENGTH]->u.fs_d.value;
+    rp.radius = params[LITEGLOW_RADIUS]->u.fs_d.value;
+    rp.threshold = params[LITEGLOW_THRESHOLD]->u.fs_d.value / 255.0f;
+    rp.quality = params[LITEGLOW_QUALITY]->u.pd.value;
+
+    // Handle downsampling for preview
+    float downscale_x = static_cast<float>(in_data->downsample_x.den) / static_cast<float>(in_data->downsample_x.num);
+    float downscale_y = static_cast<float>(in_data->downsample_y.den) / static_cast<float>(in_data->downsample_y.num);
+    rp.resolution_factor = MIN(downscale_x, downscale_y);
+
+    PF_EffectWorld* inputW = reinterpret_cast<PF_EffectWorld*>(&params[LITEGLOW_INPUT]->u.ld);
+    PF_EffectWorld* outputW = reinterpret_cast<PF_EffectWorld*>(output);
+
+    return LiteGlowProcess(in_data, out_data, inputW, outputW, &rp);
 }
 
 extern "C" DllExport
@@ -1076,8 +1551,28 @@ EffectMain(
             err = SequenceSetdown(in_data, out_data, params, output);
             break;
 
+        case PF_Cmd_GPU_DEVICE_SETUP:
+            err = GPUDeviceSetup(in_data, out_data, (PF_GPUDeviceSetupExtra*)extra);
+            break;
+
+        case PF_Cmd_GPU_DEVICE_SETDOWN:
+            err = GPUDeviceSetdown(in_data, out_data, (PF_GPUDeviceSetdownExtra*)extra);
+            break;
+
         case PF_Cmd_RENDER:
             err = Render(in_data, out_data, params, output);
+            break;
+
+        case PF_Cmd_SMART_PRE_RENDER:
+            err = PreRender(in_data, out_data, (PF_PreRenderExtra*)extra);
+            break;
+
+        case PF_Cmd_SMART_RENDER:
+            err = SmartRender(in_data, out_data, (PF_SmartRenderExtra*)extra, false);
+            break;
+
+        case PF_Cmd_SMART_RENDER_GPU:
+            err = SmartRender(in_data, out_data, (PF_SmartRenderExtra*)extra, true);
             break;
 
         default:
