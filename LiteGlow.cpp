@@ -94,7 +94,8 @@ GlobalSetup(
     PF_ParamDef* params[],
     PF_LayerDef* output)
 {
-    out_data->my_version = LITEGLOW_VERSION;
+    static const PFVersionInfo kLiteGlowVersion = (PFVersionInfo)LITEGLOW_VERSION_VALUE;
+    out_data->my_version = kLiteGlowVersion;
 
     // Basic flags: deep color, pixel independence, UI updates.
     out_data->out_flags = PF_OutFlag_DEEP_COLOR_AWARE |

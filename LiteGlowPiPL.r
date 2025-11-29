@@ -36,7 +36,7 @@ resource 'PiPL' (16000) {
             PF_PLUG_IN_SUBVERS
         },
         AE_Effect_Version {
-            LITEGLOW_VERSION
+            LITEGLOW_VERSION_VALUE
         },
         AE_Effect_Info_Flags {
             0
