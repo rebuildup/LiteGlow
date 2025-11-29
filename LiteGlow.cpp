@@ -2,6 +2,7 @@
 #include "AEFX_SuiteHelper.h"
 #include "AE_EffectGPUSuites.h"
 #include "PrSDKAESupport.h"
+#include "Smart_Utils.h"
 
 #ifdef AE_OS_WIN
     #include "DirectXUtils.h"
@@ -117,12 +118,11 @@ GlobalSetup(
             kPFPixelFormatSuiteVersion1,
             out_data);
 
-        if (pixelFormatSuite.IsValid()) {
-            (*pixelFormatSuite->ClearSupportedPixelFormats)(in_data->effect_ref);
-            (*pixelFormatSuite->AddSupportedPixelFormat)(
-                in_data->effect_ref,
-                PrPixelFormat_VUYA_4444_32f);
-        }
+        // Add the pixel formats we support in order of preference.
+        (*pixelFormatSuite->ClearSupportedPixelFormats)(in_data->effect_ref);
+        (*pixelFormatSuite->AddSupportedPixelFormat)(
+            in_data->effect_ref,
+            PrPixelFormat_VUYA_4444_32f);
     }
 #if HAS_HLSL
     else {
