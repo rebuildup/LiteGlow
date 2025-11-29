@@ -94,12 +94,7 @@ GlobalSetup(
     PF_ParamDef* params[],
     PF_LayerDef* output)
 {
-    out_data->my_version = PF_VERSION(
-        MAJOR_VERSION,
-        MINOR_VERSION,
-        BUG_VERSION,
-        STAGE_VERSION,
-        BUILD_VERSION);
+    out_data->my_version = LITEGLOW_VERSION;
 
     // Basic flags: deep color, pixel independence, UI updates.
     out_data->out_flags = PF_OutFlag_DEEP_COLOR_AWARE |

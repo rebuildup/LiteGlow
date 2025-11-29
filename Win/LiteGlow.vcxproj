@@ -386,6 +386,7 @@ if not exist "$(OutDir)\DirectX_Assets" mkdir "$(OutDir)\DirectX_Assets"
   <ItemGroup>
     <ClInclude Include="..\..\..\Headers\AE_PluginData.h" />
     <ClInclude Include="..\LiteGlow.h" />
+    <ClInclude Include="..\LiteGlow_Version.h" />
     <ClInclude Include="..\..\..\Headers\A.h" />
     <ClInclude Include="..\..\..\Headers\AE_Effect.h" />
     <ClInclude Include="..\..\..\Headers\AE_EffectCB.h" />

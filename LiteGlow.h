@@ -30,12 +30,8 @@
 
 #include "LiteGlow_Strings.h"
 
-/* Versioning information */
-#define	MAJOR_VERSION	1
-#define	MINOR_VERSION	0
-#define	BUG_VERSION		0
-#define	STAGE_VERSION	PF_Stage_DEVELOP
-#define	BUILD_VERSION	1
+/* Include version constants defined once for code/PiPL */
+#include "LiteGlow_Version.h"
 
 #define STRENGTH_MIN       0
 #define STRENGTH_MAX       2000
