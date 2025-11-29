@@ -356,28 +356,28 @@ cl /D "MSWindows" /EP $(IntDir)%(Filename).rrc &gt;               "$(ProjectDir)
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)%(Filename).rc;%(Outputs)</Outputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(ProjectDir)%(Filename).rc;%(Outputs)</Outputs>
     </CustomBuild>
-    <CustomBuild Include="..\LiteGlow_Kernel.chlsl">
+    <CustomBuild Include="..\LiteGlow_Kernel.chlsl" Condition="'$(DXC_SDK_BASE_PATH)' != ''">
       <FileType>Document</FileType>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">rem DirectX Shader Compiler is required (DXC_SDK_BASE_PATH)
-if not exist "$(OutDir)DirectX_Assets" mkdir "$(OutDir)DirectX_Assets"
-"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "%(FullPath)" -E main -Fo "$(OutDir)DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
+if not exist "$(OutDir)\DirectX_Assets" mkdir "$(OutDir)\DirectX_Assets"
+"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "%(FullPath)" -E main -Fo "$(OutDir)\DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)\DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">rem DirectX Shader Compiler is required (DXC_SDK_BASE_PATH)
-if not exist "$(OutDir)DirectX_Assets" mkdir "$(OutDir)DirectX_Assets"
-"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "%(FullPath)" -E main -Fo "$(OutDir)DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
+if not exist "$(OutDir)\DirectX_Assets" mkdir "$(OutDir)\DirectX_Assets"
+"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "%(FullPath)" -E main -Fo "$(OutDir)\DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)\DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">rem DirectX Shader Compiler is required (DXC_SDK_BASE_PATH)
-if not exist "$(OutDir)DirectX_Assets" mkdir "$(OutDir)DirectX_Assets"
-"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "%(FullPath)" -E main -Fo "$(OutDir)DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
+if not exist "$(OutDir)\DirectX_Assets" mkdir "$(OutDir)\DirectX_Assets"
+"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "%(FullPath)" -E main -Fo "$(OutDir)\DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)\DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">rem DirectX Shader Compiler is required (DXC_SDK_BASE_PATH)
-if not exist "$(OutDir)DirectX_Assets" mkdir "$(OutDir)DirectX_Assets"
-"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "%(FullPath)" -E main -Fo "$(OutDir)DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
+if not exist "$(OutDir)\DirectX_Assets" mkdir "$(OutDir)\DirectX_Assets"
+"$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "%(FullPath)" -E main -Fo "$(OutDir)\DirectX_Assets\LiteGlowKernel.cso" -Frs "$(OutDir)\DirectX_Assets\LiteGlowKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives</Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compiling LiteGlow_Kernel.chlsl with DXC</Message>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compiling LiteGlow_Kernel.chlsl with DXC</Message>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compiling LiteGlow_Kernel.chlsl with DXC</Message>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compiling LiteGlow_Kernel.chlsl with DXC</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)DirectX_Assets\LiteGlowKernel.cso;$(OutDir)DirectX_Assets\LiteGlowKernel.rs;%(Outputs)</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)DirectX_Assets\LiteGlowKernel.cso;$(OutDir)DirectX_Assets\LiteGlowKernel.rs;%(Outputs)</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)DirectX_Assets\LiteGlowKernel.cso;$(OutDir)DirectX_Assets\LiteGlowKernel.rs;%(Outputs)</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)DirectX_Assets\LiteGlowKernel.cso;$(OutDir)DirectX_Assets\LiteGlowKernel.rs;%(Outputs)</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\DirectX_Assets\LiteGlowKernel.cso;$(OutDir)\DirectX_Assets\LiteGlowKernel.rs;%(Outputs)</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\DirectX_Assets\LiteGlowKernel.cso;$(OutDir)\DirectX_Assets\LiteGlowKernel.rs;%(Outputs)</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\DirectX_Assets\LiteGlowKernel.cso;$(OutDir)\DirectX_Assets\LiteGlowKernel.rs;%(Outputs)</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\DirectX_Assets\LiteGlowKernel.cso;$(OutDir)\DirectX_Assets\LiteGlowKernel.rs;%(Outputs)</Outputs>
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
