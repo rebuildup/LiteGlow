@@ -1,17 +1,18 @@
 cbuffer LiteGlowGPUParams : register(b0)
 {
-    int srcPitch;
-    int dstPitch;
-    int width;
-    int height;
+    int   srcPitch;
+    int   dstPitch;
+    int   width;
+    int   height;
     float strengthNorm;
     float threshold;
     float radius;
-    int quality;
+    int   quality;
 };
 
 RWByteAddressBuffer gDst : register(u0);
-ByteAddressBuffer gSrc : register(t0);
+ByteAddressBuffer  gSrc : register(t0);
+
 static const float3 kLumaWeights = float3(0.2126f, 0.7152f, 0.0722f);
 
 uint4 LoadPixel(uint x, uint y)
@@ -28,14 +29,13 @@ void StorePixel(uint x, uint y, float4 value)
     gDst.Store4(index, asuint(value));
 }
 
-float GaussianWeight(int dx, int dy, float sigma)
+float Gaussian1D(float dist, float sigma)
 {
-    const float dist2 = dx * dx + dy * dy;
-    return exp(-dist2 / (2.0f * sigma * sigma));
+    return exp(-dist * dist / (2.0f * sigma * sigma));
 }
 
 [numthreads(16,16,1)]
-void CSMain(uint3 dtid : SV_DispatchThreadID)
+void main(uint3 dtid : SV_DispatchThreadID)
 {
     uint x = dtid.x;
     uint y = dtid.y;
@@ -44,44 +44,68 @@ void CSMain(uint3 dtid : SV_DispatchThreadID)
 
     uint4 baseRaw = LoadPixel(x, y);
     float4 basePixel = asfloat(baseRaw);
-    float luma = dot(basePixel.rgb, kLumaWeights);
-    float mask = saturate((luma - threshold) * 3.0f);
+
+    float baseLuma = dot(basePixel.rgb, kLumaWeights);
+    float mask = saturate((baseLuma - threshold) * 4.0f);
+
     if (mask <= 0.0f || strengthNorm <= 0.01f)
     {
         StorePixel(x, y, basePixel);
         return;
     }
 
-    int rad = clamp((int)radius, 1, 64);
-    float step = (quality <= 1) ? 3.0f : (quality == 2 ? 2.0f : 1.0f);
-    float sigma = max(1.0f, radius * 0.5f);
+    const int SAMPLES_PER_DIR = 4;
+    float rad = max(radius, 1.0f);
+    float sigma = max(rad * 0.75f, 1.0f);
 
-    float3 accum = 0.0f;
-    float weight = 0.0f;
+    static const float2 dirs[8] = {
+        float2(1.0f, 0.0f),
+        float2(-1.0f, 0.0f),
+        float2(0.0f, 1.0f),
+        float2(0.0f, -1.0f),
+        float2(0.7071f, 0.7071f),
+        float2(-0.7071f, 0.7071f),
+        float2(0.7071f, -0.7071f),
+        float2(-0.7071f, -0.7071f)
+    };
 
-    for (int dy = -rad; dy <= rad; dy += (int)step)
+    float3 accum = basePixel.rgb;
+    float totalW = 1.0f;
+
+    [unroll]
+    for (int d = 0; d < 8; ++d)
     {
-        int iy = clamp((int)y + dy, 0, height - 1);
-        for (int dx = -rad; dx <= rad; dx += (int)step)
+        float2 dir = dirs[d];
+
+        [unroll]
+        for (int s = 1; s <= SAMPLES_PER_DIR; ++s)
         {
-            int ix = clamp((int)x + dx, 0, width - 1);
-            float w = GaussianWeight(dx, dy, sigma);
-            uint4 sampleRaw = LoadPixel(ix, iy);
-            float4 sample = asfloat(sampleRaw);
-            float sLuma = dot(sample.rgb, kLumaWeights);
-            if (sLuma > threshold)
+            float dist = rad * (s / (float)SAMPLES_PER_DIR);
+            float w = Gaussian1D(dist, sigma);
+
+            int sx = (int)(x + dir.x * dist + 0.5f);
+            int sy = (int)(y + dir.y * dist + 0.5f);
+
+            sx = clamp(sx, 0, width - 1);
+            sy = clamp(sy, 0, height - 1);
+
+            float4 sample = asfloat(LoadPixel((uint)sx, (uint)sy));
+            float lum = dot(sample.rgb, kLumaWeights);
+
+            if (lum > threshold)
             {
                 accum += sample.rgb * w;
-                weight += w;
+                totalW += w;
             }
         }
     }
 
-    float3 glow = (weight > 0.0f) ? accum / weight : float3(0.0f, 0.0f, 0.0f);
+    float3 glow = accum / totalW;
     glow *= saturate(0.5f + strengthNorm * 1.5f);
     glow = saturate(glow);
 
-    float3 screen = 1.0f - (1.0f - basePixel.rgb) * (1.0f - glow);
-    float3 final = lerp(basePixel.rgb, screen, mask);
-    StorePixel(x, y, float4(final, basePixel.a));
+    float3 screenColor = 1.0f - (1.0f - basePixel.rgb) * (1.0f - glow);
+    float3 finalColor = lerp(basePixel.rgb, screenColor, mask);
+
+    StorePixel(x, y, float4(finalColor, basePixel.a));
 }
