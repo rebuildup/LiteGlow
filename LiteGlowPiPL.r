@@ -41,11 +41,18 @@ resource 'PiPL' (16000) {
         AE_Effect_Info_Flags {
             0
         },
+        // Keep PiPL flags in sync with GlobalSetup so AE knows GPU support exists.
         AE_Effect_Global_OutFlags {
-            0x06002000
+            PF_OutFlag_DEEP_COLOR_AWARE |
+            PF_OutFlag_PIX_INDEPENDENT |
+            PF_OutFlag_SEND_UPDATE_PARAMS_UI
         },
         AE_Effect_Global_OutFlags_2 {
-            0x22021400
+            PF_OutFlag2_FLOAT_COLOR_AWARE |
+            PF_OutFlag2_SUPPORTS_SMART_RENDER |
+            PF_OutFlag2_SUPPORTS_THREADED_RENDERING |
+            PF_OutFlag2_SUPPORTS_GPU_RENDER_F32 |
+            PF_OutFlag2_SUPPORTS_DIRECTX_RENDERING
         },
         AE_Effect_Match_Name {
             "361do LiteGlow"
