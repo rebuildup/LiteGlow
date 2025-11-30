@@ -42,10 +42,10 @@ resource 'PiPL' (16000) {
             0
         },
         AE_Effect_Global_OutFlags {
-            0x06000400
+            0x06002000
         },
         AE_Effect_Global_OutFlags_2 {
-            0x2A001400
+            0x22021400
         },
         AE_Effect_Match_Name {
             "361do LiteGlow"

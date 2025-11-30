@@ -1396,6 +1396,18 @@ SmartRenderGPU(
         kPFGPUDeviceSuiteVersion1,
         out_data);
 
+#if defined(_DEBUG)
+    {
+        char dbg[256];
+        snprintf(dbg, sizeof(dbg),
+            "LiteGlow SmartRenderGPU enter pf=%d what_gpu=%d gpu_data=%p\n",
+            pixel_format,
+            extraP->input->what_gpu,
+            extraP->input->gpu_data);
+        OutputDebugStringA(dbg);
+    }
+#endif
+
     // Only support DirectX BGRA128 GPU worlds. If the host gives us
     // something else for this frame, signal the caller to fall back to CPU.
     if (pixel_format != PF_PixelFormat_GPU_BGRA128 ||
@@ -1454,6 +1466,9 @@ SmartRenderGPU(
         DX_ERR(shaderExecution.Execute(
             (UINT)DivideRoundUpSizeT((size_t)gpuParams.width, 16),
             (UINT)DivideRoundUpSizeT((size_t)gpuParams.height, 16)));
+#if defined(_DEBUG)
+        OutputDebugStringA("LiteGlow SmartRenderGPU: dispatched DX compute\n");
+#endif
     }
     else {
         // Unsupported GPU framework – fall back to CPU implementation.
@@ -1603,6 +1618,16 @@ SmartRender(
                     output_worldP,
                     extraP,
                     infoP);
+
+#if defined(_DEBUG)
+                {
+                    char dbg[128];
+                    snprintf(dbg, sizeof(dbg),
+                        "LiteGlow SmartRender: GPU attempt -> %d\n",
+                        gpu_err);
+                    OutputDebugStringA(dbg);
+                }
+#endif
 
                 if (gpu_err != PF_Err_NONE) {
                     err = SmartRenderCPU(
