@@ -1422,7 +1422,6 @@ SmartRenderGPU(
 
     gpuParams.srcPitch = (int)(src_row_bytes / bytes_per_pixel);
     gpuParams.dstPitch = (int)(dst_row_bytes / bytes_per_pixel);
-    gpuParams.is16f = 0; // full float
 
     // Convert effect parameters from pre-render cache
     gpuParams.strength = params->strength / (float)STRENGTH_MAX;
