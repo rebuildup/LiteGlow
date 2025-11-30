@@ -101,8 +101,9 @@ GlobalSetup(
         PF_OutFlag_PIX_INDEPENDENT |
         PF_OutFlag_SEND_UPDATE_PARAMS_UI;
 
-    // Smart Render + threaded rendering.
-    out_data->out_flags2 = PF_OutFlag2_SUPPORTS_SMART_RENDER |
+    // Smart Render + threaded rendering + 32-bit float aware.
+    out_data->out_flags2 = PF_OutFlag2_FLOAT_COLOR_AWARE |
+        PF_OutFlag2_SUPPORTS_SMART_RENDER |
         PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
 
     // GPU support: Premiere uses pixel format suite, AE uses GPU flags directly.
@@ -1395,9 +1396,12 @@ SmartRenderGPU(
         kPFGPUDeviceSuiteVersion1,
         out_data);
 
-    if (pixel_format != PF_PixelFormat_GPU_BGRA128) {
-        // Fall back to CPU if GPU format is not what we expect.
-        return LiteGlowProcess(in_data, out_data, input_worldP, output_worldP, params);
+    // Only support DirectX BGRA128 GPU worlds. If the host gives us
+    // something else for this frame, signal the caller to fall back to CPU.
+    if (pixel_format != PF_PixelFormat_GPU_BGRA128 ||
+        extraP->input->what_gpu != PF_GPU_Framework_DIRECTX ||
+        !extraP->input->gpu_data) {
+        return PF_Err_UNRECOGNIZED_PARAM_TYPE;
     }
 
     PF_GPUDeviceInfo device_info;
@@ -1589,10 +1593,37 @@ SmartRender(
 
         if (!err) {
             if (isGPU) {
-                ERR(SmartRenderGPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, infoP));
+                // Try GPU path first; if it fails for any reason,
+                // fall back to the CPU implementation.
+                PF_Err gpu_err = SmartRenderGPU(
+                    in_data,
+                    out_data,
+                    pixel_format,
+                    input_worldP,
+                    output_worldP,
+                    extraP,
+                    infoP);
+
+                if (gpu_err != PF_Err_NONE) {
+                    err = SmartRenderCPU(
+                        in_data,
+                        out_data,
+                        pixel_format,
+                        input_worldP,
+                        output_worldP,
+                        extraP,
+                        infoP);
+                }
             }
             else {
-                ERR(SmartRenderCPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, infoP));
+                err = SmartRenderCPU(
+                    in_data,
+                    out_data,
+                    pixel_format,
+                    input_worldP,
+                    output_worldP,
+                    extraP,
+                    infoP);
             }
         }
     }

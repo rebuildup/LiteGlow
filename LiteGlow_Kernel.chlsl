@@ -58,6 +58,19 @@ void main(uint3 dtid : SV_DispatchThreadID)
     float rad = max(radius, 1.0f);
     float sigma = max(rad * 0.75f, 1.0f);
 
+    // Precompute sample distances and Gaussian weights once per pixel
+    float distances[SAMPLES_PER_DIR];
+    float weights[SAMPLES_PER_DIR];
+
+    [unroll]
+    for (int s = 0; s < SAMPLES_PER_DIR; ++s)
+    {
+        float t = (float)(s + 1) / (float)SAMPLES_PER_DIR;
+        float dist = rad * t;
+        distances[s] = dist;
+        weights[s] = Gaussian1D(dist, sigma);
+    }
+
     static const float2 dirs[8] = {
         float2(1.0f, 0.0f),
         float2(-1.0f, 0.0f),
@@ -78,10 +91,10 @@ void main(uint3 dtid : SV_DispatchThreadID)
         float2 dir = dirs[d];
 
         [unroll]
-        for (int s = 1; s <= SAMPLES_PER_DIR; ++s)
+        for (int s = 0; s < SAMPLES_PER_DIR; ++s)
         {
-            float dist = rad * (s / (float)SAMPLES_PER_DIR);
-            float w = Gaussian1D(dist, sigma);
+            float dist = distances[s];
+            float w = weights[s];
 
             int sx = (int)(x + dir.x * dist + 0.5f);
             int sy = (int)(y + dir.y * dist + 0.5f);
