@@ -1203,40 +1203,38 @@ LiteGlowProcess(
                         }
                     }
                 }
-            }
-                if (!err) {
-                    if (use_scaled) {
-                        ResampleWorld(&scaled_blur_v, &blur_v_world, is_deep);
-                    }
 
-                    // STEP 4: Blend original and glow
-                    BlendData blend_data;
-                    blend_data.glow = &blur_v_world;
-                    blend_data.quality = quality;
-                    blend_data.strength = strength;
+                if (use_scaled) {
+                    ResampleWorld(&scaled_blur_v, &blur_v_world, is_deep);
+                }
 
-                    if (is_deep) {
-                        ERR(suites.Iterate16Suite2()->iterate(
-                            in_data,
-                            0,               // progress base
-                            linesL,          // progress final
-                            inputW,          // src (original)
-                            NULL,            // area - null for all pixels
-                            (void*)&blend_data, // refcon - blend parameters
-                            BlendGlow16,     // pixel function
-                            outputW));       // destination
-                    }
-                    else {
-                        ERR(suites.Iterate8Suite2()->iterate(
-                            in_data,
-                            0,               // progress base
-                            linesL,          // progress final
-                            inputW,          // src (original)
-                            NULL,            // area - null for all pixels
-                            (void*)&blend_data, // refcon - blend parameters
-                            BlendGlow8,      // pixel function
-                            outputW));       // destination
-                    }
+                // STEP 4: Blend original and glow
+                BlendData blend_data;
+                blend_data.glow = &blur_v_world;
+                blend_data.quality = quality;
+                blend_data.strength = strength;
+
+                if (is_deep) {
+                    ERR(suites.Iterate16Suite2()->iterate(
+                        in_data,
+                        0,               // progress base
+                        linesL,          // progress final
+                        inputW,          // src (original)
+                        NULL,            // area - null for all pixels
+                        (void*)&blend_data, // refcon - blend parameters
+                        BlendGlow16,     // pixel function
+                        outputW));       // destination
+                }
+                else {
+                    ERR(suites.Iterate8Suite2()->iterate(
+                        in_data,
+                        0,               // progress base
+                        linesL,          // progress final
+                        inputW,          // src (original)
+                        NULL,            // area - null for all pixels
+                        (void*)&blend_data, // refcon - blend parameters
+                        BlendGlow8,      // pixel function
+                        outputW));       // destination
                 }
             }
         }
