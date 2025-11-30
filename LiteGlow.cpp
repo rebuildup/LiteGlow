@@ -290,6 +290,93 @@ inline float PerceivedBrightness16(const PF_Pixel16* p) {
     return (0.2126f * p->red + 0.7152f * p->green + 0.0722f * p->blue);
 }
 
+// Utility helpers for resampling
+static inline float clamp01(float v) {
+    return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+}
+
+struct NormalizedPixel {
+    float r, g, b, a;
+};
+
+static NormalizedPixel ReadNormalized(PF_EffectWorld* world, int x, int y, PF_Boolean is_deep) {
+    NormalizedPixel result;
+    if (is_deep) {
+        PF_Pixel16* p = GetPixel16(world, x, y);
+        result = {
+            p->red / 32768.0f,
+            p->green / 32768.0f,
+            p->blue / 32768.0f,
+            p->alpha / 32768.0f
+        };
+    }
+    else {
+        PF_Pixel8* p = GetPixel8(world, x, y);
+        result = {
+            p->red / 255.0f,
+            p->green / 255.0f,
+            p->blue / 255.0f,
+            p->alpha / 255.0f
+        };
+    }
+    return result;
+}
+
+static void WriteNormalized(PF_EffectWorld* world, int x, int y, const NormalizedPixel& px, PF_Boolean is_deep) {
+    if (is_deep) {
+        PF_Pixel16* p = GetPixel16(world, x, y);
+        p->red = (A_u_short)MIN(32768.0f, MAX(0.0f, px.r * 32768.0f));
+        p->green = (A_u_short)MIN(32768.0f, MAX(0.0f, px.g * 32768.0f));
+        p->blue = (A_u_short)MIN(32768.0f, MAX(0.0f, px.b * 32768.0f));
+        p->alpha = (A_u_short)MIN(32768.0f, MAX(0.0f, px.a * 32768.0f));
+    }
+    else {
+        PF_Pixel8* p = GetPixel8(world, x, y);
+        p->red = (A_u_char)MIN(255.0f, MAX(0.0f, px.r * 255.0f));
+        p->green = (A_u_char)MIN(255.0f, MAX(0.0f, px.g * 255.0f));
+        p->blue = (A_u_char)MIN(255.0f, MAX(0.0f, px.b * 255.0f));
+        p->alpha = (A_u_char)MIN(255.0f, MAX(0.0f, px.a * 255.0f));
+    }
+}
+
+static inline float lerp(float a, float b, float t) {
+    return a + (b - a) * t;
+}
+
+static NormalizedPixel LerpPixel(const NormalizedPixel& a, const NormalizedPixel& b, float t) {
+    return { lerp(a.r, b.r, t), lerp(a.g, b.g, t), lerp(a.b, b.b, t), lerp(a.a, b.a, t) };
+}
+
+static void ResampleWorld(PF_EffectWorld* src, PF_EffectWorld* dst, PF_Boolean is_deep) {
+    const float scaleX = (float)dst->width / (float)src->width;
+    const float scaleY = (float)dst->height / (float)src->height;
+
+    for (int y = 0; y < dst->height; ++y) {
+        const float srcY = (y + 0.5f) / scaleY - 0.5f;
+        const int y0 = MAX(0, MIN(src->height - 1, (int)floor(srcY)));
+        const int y1 = MIN(src->height - 1, y0 + 1);
+        const float fy = clamp01(srcY - y0);
+
+        for (int x = 0; x < dst->width; ++x) {
+            const float srcX = (x + 0.5f) / scaleX - 0.5f;
+            const int x0 = MAX(0, MIN(src->width - 1, (int)floor(srcX)));
+            const int x1 = MIN(src->width - 1, x0 + 1);
+            const float fx = clamp01(srcX - x0);
+
+            NormalizedPixel c00 = ReadNormalized(src, x0, y0, is_deep);
+            NormalizedPixel c10 = ReadNormalized(src, x1, y0, is_deep);
+            NormalizedPixel c01 = ReadNormalized(src, x0, y1, is_deep);
+            NormalizedPixel c11 = ReadNormalized(src, x1, y1, is_deep);
+
+            NormalizedPixel top = LerpPixel(c00, c10, fx);
+            NormalizedPixel bottom = LerpPixel(c01, c11, fx);
+            NormalizedPixel result = LerpPixel(top, bottom, fy);
+
+            WriteNormalized(dst, x, y, result, is_deep);
+        }
+    }
+}
+
 // Edge detection using Sobel operators
 inline float EdgeStrength8(PF_EffectWorld* world, int x, int y) {
     const int sobel_x[3][3] = {
@@ -845,6 +932,7 @@ LiteGlowProcess(
 
     // Create temporary buffers for processing
     PF_EffectWorld bright_world, blur_h_world, blur_v_world;
+    PF_EffectWorld scaled_input, scaled_bright, scaled_blur_h, scaled_blur_v;
 
     // Create temporary worlds with matching bit depth
     // Use output's depth to ensure consistency
@@ -871,36 +959,81 @@ LiteGlowProcess(
         is_deep,
         &blur_v_world));
 
+    float downsample_scale = 1.0f;
+    if (adjusted_radius > 48.0f) {
+        downsample_scale = 0.25f;
+    }
+    else if (adjusted_radius > 24.0f) {
+        downsample_scale = 0.5f;
+    }
+
+    PF_Boolean use_scaled = (downsample_scale < 1.0f);
+    if (use_scaled) {
+        int scaled_width = MAX(1, (int)(outputW->width * downsample_scale));
+        int scaled_height = MAX(1, (int)(outputW->height * downsample_scale));
+
+        ERR(suites.WorldSuite1()->new_world(
+            in_data->effect_ref,
+            scaled_width,
+            scaled_height,
+            is_deep,
+            &scaled_input));
+        ERR(suites.WorldSuite1()->new_world(
+            in_data->effect_ref,
+            scaled_width,
+            scaled_height,
+            is_deep,
+            &scaled_bright));
+        ERR(suites.WorldSuite1()->new_world(
+            in_data->effect_ref,
+            scaled_width,
+            scaled_height,
+            is_deep,
+            &scaled_blur_h));
+        ERR(suites.WorldSuite1()->new_world(
+            in_data->effect_ref,
+            scaled_width,
+            scaled_height,
+            is_deep,
+            &scaled_blur_v));
+
+        if (!err) {
+            ResampleWorld(inputW, &scaled_input, is_deep);
+        }
+    }
+
     if (!err) {
         // Create glow parameters
         GlowData gdata;
         gdata.strength = strength;
-        gdata.threshold = threshold_norm * 255.0f; // ExtractBrightAreas expects 0-255 scale
-        gdata.input = inputW;
-        gdata.resolution_factor = resolution_factor;
+        gdata.threshold = threshold_norm * 255.0f;
+        gdata.input = use_scaled ? &scaled_input : inputW;
+        gdata.resolution_factor = resolution_factor * (use_scaled ? downsample_scale : 1.0f);
 
-        // STEP 1: Extract bright areas with edge detection
+        PF_EffectWorld* bright_dest = use_scaled ? &scaled_bright : &bright_world;
+        A_long bright_lines = bright_dest->height;
+
         if (is_deep) {
             ERR(suites.Iterate16Suite2()->iterate(
                 in_data,
-                0,                // progress base
-                linesL,           // progress final
-                inputW,           // src 
-                NULL,             // area - null for all pixels
-                (void*)&gdata,    // refcon with parameters
-                ExtractBrightAreas16, // pixel function
-                &bright_world));  // destination
+                0,
+                bright_lines,
+                gdata.input,
+                NULL,
+                (void*)&gdata,
+                ExtractBrightAreas16,
+                bright_dest));
         }
         else {
             ERR(suites.Iterate8Suite2()->iterate(
                 in_data,
-                0,                // progress base
-                linesL,           // progress final
-                inputW,           // src 
-                NULL,             // area - null for all pixels
-                (void*)&gdata,    // refcon with parameters
-                ExtractBrightAreas8,  // pixel function
-                &bright_world));  // destination
+                0,
+                bright_lines,
+                gdata.input,
+                NULL,
+                (void*)&gdata,
+                ExtractBrightAreas8,
+                bright_dest));
         }
 
         if (!err) {
@@ -953,122 +1086,129 @@ LiteGlowProcess(
                 suites.HandleSuite1()->host_unlock_handle(in_data->sequence_data);
             }
 
-            // Create blur data with kernel
             BlurData bdata;
-            bdata.input = &bright_world;
+            PF_EffectWorld* blur_source = bright_dest;
+            PF_EffectWorld* blur_h_dest = use_scaled ? &scaled_blur_h : &blur_h_world;
+            PF_EffectWorld* blur_v_dest = use_scaled ? &scaled_blur_v : &blur_v_world;
+            bdata.input = blur_source;
             bdata.radius = kernel_radius;
             bdata.kernel = kernel;
 
-            // STEP 2: Apply horizontal Gaussian blur
+            A_long blur_h_lines = blur_h_dest->height;
+            A_long blur_v_lines = blur_v_dest->height;
+
             if (is_deep) {
                 ERR(suites.Iterate16Suite2()->iterate(
                     in_data,
-                    0,                // progress base
-                    linesL,           // progress final
-                    &bright_world,    // src 
-                    NULL,             // area - null for all pixels
-                    (void*)&bdata,    // refcon with blur data
-                    GaussianBlurH16,  // pixel function
-                    &blur_h_world));  // destination
+                    0,
+                    blur_h_lines,
+                    blur_source,
+                    NULL,
+                    (void*)&bdata,
+                    GaussianBlurH16,
+                    blur_h_dest));
             }
             else {
                 ERR(suites.Iterate8Suite2()->iterate(
                     in_data,
-                    0,                // progress base
-                    linesL,           // progress final
-                    &bright_world,    // src 
-                    NULL,             // area - null for all pixels
-                    (void*)&bdata,    // refcon with blur data
-                    GaussianBlurH8,   // pixel function
-                    &blur_h_world));  // destination
+                    0,
+                    blur_h_lines,
+                    blur_source,
+                    NULL,
+                    (void*)&bdata,
+                    GaussianBlurH8,
+                    blur_h_dest));
             }
 
             if (!err) {
-                // Update blur data for vertical pass
-                bdata.input = &blur_h_world;
+                // update blur data for vertical pass
+                bdata.input = blur_h_dest;
 
-                // STEP 3: Apply vertical Gaussian blur
                 if (is_deep) {
                     ERR(suites.Iterate16Suite2()->iterate(
                         in_data,
-                        0,               // progress base
-                        linesL,          // progress final
-                        &blur_h_world,   // src 
-                        NULL,            // area - null for all pixels
-                        (void*)&bdata,   // refcon with blur data
-                        GaussianBlurV16, // pixel function
-                        &blur_v_world)); // destination
+                        0,
+                        blur_v_lines,
+                        blur_h_dest,
+                        NULL,
+                        (void*)&bdata,
+                        GaussianBlurV16,
+                        blur_v_dest));
                 }
                 else {
                     ERR(suites.Iterate8Suite2()->iterate(
                         in_data,
-                        0,               // progress base
-                        linesL,          // progress final
-                        &blur_h_world,   // src 
-                        NULL,            // area - null for all pixels
-                        (void*)&bdata,   // refcon with blur data
-                        GaussianBlurV8,  // pixel function
-                        &blur_v_world)); // destination
+                        0,
+                        blur_v_lines,
+                        blur_h_dest,
+                        NULL,
+                        (void*)&bdata,
+                        GaussianBlurV8,
+                        blur_v_dest));
                 }
 
-                // For high quality, apply a second blur pass when not in preview mode
                 if (quality == QUALITY_HIGH && !err && strength > 500.0f && resolution_factor > 0.9f) {
-                    // Second horizontal blur
-                    bdata.input = &blur_v_world;
+                    PF_EffectWorld* extra_world = use_scaled ? &scaled_bright : &bright_world;
+                    bdata.input = blur_v_dest;
+
+                    A_long extra_lines = extra_world->height;
 
                     if (is_deep) {
                         ERR(suites.Iterate16Suite2()->iterate(
                             in_data,
-                            0,               // progress base
-                            linesL,          // progress final
-                            &blur_v_world,   // src 
-                            NULL,            // area - null for all pixels
-                            (void*)&bdata,   // refcon with blur data
-                            GaussianBlurH16, // pixel function
-                            &bright_world)); // destination (reuse)
+                            0,
+                            extra_lines,
+                            blur_v_dest,
+                            NULL,
+                            (void*)&bdata,
+                            GaussianBlurH16,
+                            extra_world));
                     }
                     else {
                         ERR(suites.Iterate8Suite2()->iterate(
                             in_data,
-                            0,               // progress base
-                            linesL,          // progress final
-                            &blur_v_world,   // src 
-                            NULL,            // area - null for all pixels
-                            (void*)&bdata,   // refcon with blur data
-                            GaussianBlurH8,  // pixel function
-                            &bright_world)); // destination (reuse)
+                            0,
+                            extra_lines,
+                            blur_v_dest,
+                            NULL,
+                            (void*)&bdata,
+                            GaussianBlurH8,
+                            extra_world));
                     }
 
                     if (!err) {
-                        // Second vertical blur
-                        bdata.input = &bright_world;
+                        bdata.input = extra_world;
 
                         if (is_deep) {
                             ERR(suites.Iterate16Suite2()->iterate(
                                 in_data,
-                                0,               // progress base
-                                linesL,          // progress final
-                                &bright_world,   // src 
-                                NULL,            // area - null for all pixels
-                                (void*)&bdata,   // refcon with blur data
-                                GaussianBlurV16, // pixel function
-                                &blur_v_world)); // destination
+                                0,
+                                blur_v_lines,
+                                extra_world,
+                                NULL,
+                                (void*)&bdata,
+                                GaussianBlurV16,
+                                blur_v_dest));
                         }
                         else {
                             ERR(suites.Iterate8Suite2()->iterate(
                                 in_data,
-                                0,               // progress base
-                                linesL,          // progress final
-                                &bright_world,   // src 
-                                NULL,            // area - null for all pixels
-                                (void*)&bdata,   // refcon with blur data
-                                GaussianBlurV8,  // pixel function
-                                &blur_v_world)); // destination
+                                0,
+                                blur_v_lines,
+                                extra_world,
+                                NULL,
+                                (void*)&bdata,
+                                GaussianBlurV8,
+                                blur_v_dest));
                         }
                     }
                 }
-
+            }
                 if (!err) {
+                    if (use_scaled) {
+                        ResampleWorld(&scaled_blur_v, &blur_v_world, is_deep);
+                    }
+
                     // STEP 4: Blend original and glow
                     BlendData blend_data;
                     blend_data.glow = &blur_v_world;
@@ -1105,6 +1245,12 @@ LiteGlowProcess(
         ERR(suites.WorldSuite1()->dispose_world(in_data->effect_ref, &bright_world));
         ERR(suites.WorldSuite1()->dispose_world(in_data->effect_ref, &blur_h_world));
         ERR(suites.WorldSuite1()->dispose_world(in_data->effect_ref, &blur_v_world));
+        if (use_scaled) {
+            ERR(suites.WorldSuite1()->dispose_world(in_data->effect_ref, &scaled_input));
+            ERR(suites.WorldSuite1()->dispose_world(in_data->effect_ref, &scaled_bright));
+            ERR(suites.WorldSuite1()->dispose_world(in_data->effect_ref, &scaled_blur_h));
+            ERR(suites.WorldSuite1()->dispose_world(in_data->effect_ref, &scaled_blur_v));
+        }
     }
 
     return err;
@@ -1580,3 +1726,5 @@ EffectMain(
     }
     return err;
 }
+#include <algorithm>
+#include <cmath>
