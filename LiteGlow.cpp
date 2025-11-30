@@ -44,7 +44,6 @@ typedef struct
 {
     int   srcPitch;
     int   dstPitch;
-    int   is16f;
     int   width;
     int   height;
     float strength;

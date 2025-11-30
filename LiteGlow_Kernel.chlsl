@@ -1,100 +1,87 @@
-// Simple DirectX compute shader for LiteGlow.
-// It operates on a BGRA128 (float4) GPU world passed as a ByteAddressBuffer.
-// Layout must match LiteGlowGPUParams in LiteGlow.cpp.
-
 cbuffer LiteGlowGPUParams : register(b0)
 {
-    int   gSrcPitch;      // pixels per row in source
-    int   gDstPitch;      // pixels per row in dest
-    int   gIs16f;         // unused (always 0 for BGRA128)
-    int   gWidth;
-    int   gHeight;
-    float gStrengthNorm;  // strength / STRENGTH_MAX (0..1)
-    float gThreshold;     // 0..1
-    float gRadius;        // blur radius in pixels
-    int   gQuality;       // QUALITY_* enum (1..3)
+    int srcPitch;
+    int dstPitch;
+    int width;
+    int height;
+    float strengthNorm;
+    float threshold;
+    float radius;
+    int quality;
 };
 
 RWByteAddressBuffer gDst : register(u0);
-ByteAddressBuffer  gSrc : register(t0);
-
+ByteAddressBuffer gSrc : register(t0);
 static const float3 kLumaWeights = float3(0.2126f, 0.7152f, 0.0722f);
 
+uint4 LoadPixel(uint x, uint y)
+{
+    const uint bytesPerPixel = 16;
+    uint index = (y * (uint)srcPitch + x) * bytesPerPixel;
+    return gSrc.Load4(index);
+}
+
+void StorePixel(uint x, uint y, float4 value)
+{
+    const uint bytesPerPixel = 16;
+    uint index = (y * (uint)dstPitch + x) * bytesPerPixel;
+    gDst.Store4(index, asuint(value));
+}
+
+float GaussianWeight(int dx, int dy, float sigma)
+{
+    const float dist2 = dx * dx + dy * dy;
+    return exp(-dist2 / (2.0f * sigma * sigma));
+}
+
 [numthreads(16,16,1)]
-void main(uint3 dtid : SV_DispatchThreadID)
+void CSMain(uint3 dtid : SV_DispatchThreadID)
 {
     uint x = dtid.x;
     uint y = dtid.y;
-    if (x >= (uint)gWidth || y >= (uint)gHeight)
+    if (x >= (uint)width || y >= (uint)height)
         return;
 
-    const uint bytesPerPixel = 16u; // sizeof(float4)
-    uint srcIndex = (y * (uint)gSrcPitch + x) * bytesPerPixel;
-    uint dstIndex = (y * (uint)gDstPitch + x) * bytesPerPixel;
-
-    // Load source pixel as float4
-    uint4 srcRaw = gSrc.Load4(srcIndex);
-    float4 src = asfloat(srcRaw);
-
-    // Basic luminance-based mask
-    float luma = dot(src.rgb, kLumaWeights);
-    float mask = saturate((luma - gThreshold) * 4.0f);
-    if (mask <= 0.0f || gStrengthNorm <= 0.0f)
+    uint4 baseRaw = LoadPixel(x, y);
+    float4 basePixel = asfloat(baseRaw);
+    float luma = dot(basePixel.rgb, kLumaWeights);
+    float mask = saturate((luma - threshold) * 3.0f);
+    if (mask <= 0.0f || strengthNorm <= 0.01f)
     {
-        gDst.Store4(dstIndex, srcRaw);
+        StorePixel(x, y, basePixel);
         return;
     }
 
-    // Quality affects sampling density (simple approximation)
-    int r = (int)clamp(gRadius, 1.0f, 32.0f);
-    int step = 1;
-    if (gQuality <= 1)
-        step = 3;
-    else if (gQuality == 2)
-        step = 2;
+    int rad = clamp((int)radius, 1, 64);
+    float step = (quality <= 1) ? 3.0f : (quality == 2 ? 2.0f : 1.0f);
+    float sigma = max(1.0f, radius * 0.5f);
 
-    const float sigma = gRadius * 0.75f;
-    const float twoSigma2 = max(1e-4f, 2.0f * sigma * sigma);
+    float3 accum = 0.0f;
+    float weight = 0.0f;
 
-    float3 accumGlow = 0.0f;
-    float  accumW = 0.0f;
-
-    // Simple local blur in a disc
-    for (int dy = -r; dy <= r; dy += step)
+    for (int dy = -rad; dy <= rad; dy += (int)step)
     {
-        int iy = (int)y + dy;
-        iy = clamp(iy, 0, gHeight - 1);
-
-        for (int dx = -r; dx <= r; dx += step)
+        int iy = clamp((int)y + dy, 0, height - 1);
+        for (int dx = -rad; dx <= rad; dx += (int)step)
         {
-            int ix = (int)x + dx;
-            ix = clamp(ix, 0, gWidth - 1);
-
-            float dist2 = (float)(dx * dx + dy * dy);
-            float w = exp(-dist2 / twoSigma2);
-
-            uint nIndex = ((uint)iy * (uint)gSrcPitch + (uint)ix) * bytesPerPixel;
-            float4 p = asfloat(gSrc.Load4(nIndex));
-            float l = dot(p.rgb, kLumaWeights);
-
-            float localMask = (l > gThreshold) ? 1.0f : 0.0f;
-
-            accumGlow += p.rgb * (w * localMask);
-            accumW += w * localMask;
+            int ix = clamp((int)x + dx, 0, width - 1);
+            float w = GaussianWeight(dx, dy, sigma);
+            uint4 sampleRaw = LoadPixel(ix, iy);
+            float4 sample = asfloat(sampleRaw);
+            float sLuma = dot(sample.rgb, kLumaWeights);
+            if (sLuma > threshold)
+            {
+                accum += sample.rgb * w;
+                weight += w;
+            }
         }
     }
 
-    float3 glow = (accumW > 0.0f) ? (accumGlow / accumW) : 0.0f;
-
-    // Scale glow by normalized strength and clamp
-    glow *= (0.5f + gStrengthNorm * 1.5f);
+    float3 glow = (weight > 0.0f) ? accum / weight : float3(0.0f, 0.0f, 0.0f);
+    glow *= saturate(0.5f + strengthNorm * 1.5f);
     glow = saturate(glow);
 
-    // Screen blend
-    float3 screenColor = 1.0f - (1.0f - src.rgb) * (1.0f - glow);
-
-    float3 finalRGB = lerp(src.rgb, screenColor, mask);
-    float4 outColor = float4(finalRGB, src.a);
-
-    gDst.Store4(dstIndex, asuint(outColor));
+    float3 screen = 1.0f - (1.0f - basePixel.rgb) * (1.0f - glow);
+    float3 final = lerp(basePixel.rgb, screen, mask);
+    StorePixel(x, y, float4(final, basePixel.a));
 }
