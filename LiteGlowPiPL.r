@@ -45,9 +45,10 @@ resource 'PiPL' (16000) {
             0x06000400
         },
         AE_Effect_Global_OutFlags_2 {
-            // 0x0A001400 base + 0x00030000 for GPU bits; I_MIX_GUID_DEPENDENCIES is intentionally
-            // NOT set to avoid GuidMixInPtr requirement during SMART_PRE_RENDER.
-            0x0A301400
+            // Base flags for Smart Render + GPU support
+            // FLOAT_COLOR_AWARE | SUPPORTS_SMART_RENDER | SUPPORTS_THREADED_RENDERING | GPU flags
+            // I_MIX_GUID_DEPENDENCIES (0x02000000) is NOT set to avoid GuidMixInPtr requirement
+            0x08301400
         },
         AE_Effect_Match_Name {
             "361do LiteGlow"

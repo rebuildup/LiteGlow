@@ -102,9 +102,9 @@ GlobalSetup(
         PF_OutFlag_SEND_UPDATE_PARAMS_UI;
 
     // Smart Render + threaded rendering + 32-bit float aware + GPU bits.
-    // PiPLと一致させるため、明示的に値を設定（0x0A301400）
-    // I_MIX_GUID_DEPENDENCIESは含まれていないため、GuidMixInPtrは不要
-    const PF_OutFlags2 kOutFlags2Code = 0x0A301400;
+    // PiPLと一致させるため、明示的に値を設定（0x08301400）
+    // I_MIX_GUID_DEPENDENCIES (0x02000000) は含めない - GuidMixInPtrは不要
+    const PF_OutFlags2 kOutFlags2Code = 0x08301400;
 
     out_data->out_flags2 = kOutFlags2Code;
 
