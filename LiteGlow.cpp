@@ -31,11 +31,9 @@ GlobalSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
         PF_OutFlag_PIX_INDEPENDENT |
         PF_OutFlag_DEEP_COLOR_AWARE;
 
-    // Enable threaded rendering + Smart Render + GPU declaration (GPU path will safely fall back)
+    // Enable threaded rendering + Smart Render (GPUは未実装のため宣言しない)
     out_data->out_flags2 = PF_OutFlag2_SUPPORTS_THREADED_RENDERING |
-        PF_OutFlag2_SUPPORTS_SMART_RENDER |
-        PF_OutFlag2_SUPPORTS_GPU_RENDER_F32 |
-        PF_OutFlag2_SUPPORTS_DIRECTX_RENDERING;
+        PF_OutFlag2_SUPPORTS_SMART_RENDER;
 
     return PF_Err_NONE;
 }
@@ -348,31 +346,9 @@ static PF_Err BlendScreen16(void* refcon, A_long x, A_long y, PF_Pixel16* inP, P
     return PF_Err_NONE;
 }
 
-// GPUモード時にわずかにクール寄りの色味を乗せて「GPU処理である」ことを視覚化
-static PF_Err TintCool8(void* /*refcon*/, A_long /*x*/, A_long /*y*/, PF_Pixel8* inP, PF_Pixel8* outP)
-{
-    const float tintR = 0.96f, tintG = 1.02f, tintB = 1.08f;
-    outP->red   = (A_u_char)MIN(255.f, inP->red   * tintR);
-    outP->green = (A_u_char)MIN(255.f, inP->green * tintG);
-    outP->blue  = (A_u_char)MIN(255.f, inP->blue  * tintB);
-    outP->alpha = inP->alpha;
-    return PF_Err_NONE;
-}
-
-static PF_Err TintCool16(void* /*refcon*/, A_long /*x*/, A_long /*y*/, PF_Pixel16* inP, PF_Pixel16* outP)
-{
-    const float tintR = 0.96f, tintG = 1.02f, tintB = 1.08f;
-    outP->red   = (A_u_short)MIN(32768.f, inP->red   * tintR);
-    outP->green = (A_u_short)MIN(32768.f, inP->green * tintG);
-    outP->blue  = (A_u_short)MIN(32768.f, inP->blue  * tintB);
-    outP->alpha = inP->alpha;
-    return PF_Err_NONE;
-}
-
 // -------- Render --------
 typedef enum {
-    LITEGLOW_MODE_CPU = 0,
-    LITEGLOW_MODE_GPU = 1
+    LITEGLOW_MODE_CPU = 0
 } LiteGlowMode;
 
 typedef struct {
@@ -402,12 +378,7 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, const LiteGlowSettings& 
     if (quality == QUALITY_LOW)  radius = MAX(1, radius / 2);
     radius = MIN(radius, 32);
 
-    // GPUモードでは高速化のために計算を軽量化し、見た目もわずかにクール寄りに変化させる
-    bool gpu_mode = (settings.mode == LITEGLOW_MODE_GPU);
-    if (gpu_mode) {
-        radius = MAX(1, radius / 2);        // 半径を半分にしてループ回数を減らす
-        strength_norm *= 1.15f;             // 少し強めて視覚的に差を出す
-    }
+    bool gpu_mode = false; // GPU未対応
 
     // Early out
     if (strength_norm <= 0.0001f || radius <= 0) {
@@ -489,14 +460,7 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, const LiteGlowSettings& 
     }
 
     // GPUモードのときはクール系の色味をわずかに乗せて視覚上の差を明示
-    if (!err && gpu_mode && (pixfmt == PF_PixelFormat_ARGB32 || pixfmt == PF_PixelFormat_ARGB64)) {
-        A_long lines = outputW->height;
-        if (pixfmt == PF_PixelFormat_ARGB32) {
-            ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines, outputW, NULL, NULL, TintCool8, outputW));
-        } else {
-            ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines, outputW, NULL, NULL, TintCool16, outputW));
-        }
-    }
+    (void)gpu_mode; // silence unused warning
 
     // Dispose temps
     worldSuite->PF_DisposeWorld(in_data->effect_ref, &brightW);
@@ -516,7 +480,6 @@ Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_Layer
     s.radius = params[LITEGLOW_RADIUS]->u.fs_d.value;
     s.threshold = params[LITEGLOW_THRESHOLD]->u.fs_d.value;
     s.quality = params[LITEGLOW_QUALITY]->u.pd.value;
-    s.mode = LITEGLOW_MODE_CPU;
     return ProcessWorlds(in_data, out_data, s, inputW, outputW);
 }
 
@@ -528,8 +491,7 @@ SmartPreRender(PF_InData* in_data, PF_OutData* out_data, PF_PreRenderExtra* pre)
     PF_RenderRequest req = pre->input->output_request;
     PF_CheckoutResult in_result;
 
-    // Advertise GPU path; host will choose CPU if GPU unavailable.
-    pre->output->flags |= PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
+    // GPU 未対応のためフラグは立てない
 
     ERR(pre->cb->checkout_layer(
         in_data->effect_ref,
@@ -580,7 +542,6 @@ SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extra
     if (!err) {
         LiteGlowSettings* s = reinterpret_cast<LiteGlowSettings*>(extraP->input->pre_render_data);
         if (s) {
-            s->mode = LITEGLOW_MODE_CPU;
             err = ProcessWorlds(in_data, out_data, *s, input_worldP, output_worldP);
             free(s);
         } else {
@@ -593,42 +554,7 @@ SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extra
 }
 
 static PF_Err
-SmartRenderGPU(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extraP)
-{
-    PF_Err err = PF_Err_NONE;
-    PF_EffectWorld* input_worldP = nullptr;
-    PF_EffectWorld* output_worldP = nullptr;
-
-    // Safely perform CPU processing even in GPU selector to avoid crashes.
-    ERR(extraP->cb->checkout_layer_pixels(in_data->effect_ref, LITEGLOW_INPUT, &input_worldP));
-    ERR(extraP->cb->checkout_output(in_data->effect_ref, &output_worldP));
-
-    if (!err) {
-        LiteGlowSettings* s = reinterpret_cast<LiteGlowSettings*>(extraP->input->pre_render_data);
-        if (s) {
-            s->mode = LITEGLOW_MODE_GPU;
-            err = ProcessWorlds(in_data, out_data, *s, input_worldP, output_worldP);
-            free(s);
-        } else {
-            err = PF_Err_BAD_CALLBACK_PARAM;
-        }
-    }
-
-    extraP->cb->checkin_layer_pixels(in_data->effect_ref, LITEGLOW_INPUT);
-    return err;
-}
-
-static PF_Err
-GPUDeviceSetup(PF_InData* /*in_data*/, PF_OutData* /*out_data*/, PF_GPUDeviceSetupExtra* /*extraP*/)
-{
-    return PF_Err_NONE;
-}
-
-static PF_Err
-GPUDeviceSetdown(PF_InData* /*in_data*/, PF_OutData* /*out_data*/, PF_GPUDeviceSetdownExtra* /*extraP*/)
-{
-    return PF_Err_NONE;
-}
+// GPU モード未サポート
 
 // -------- Entry ----------
 extern "C" DllExport
@@ -669,9 +595,6 @@ EffectMain(
         case PF_Cmd_RENDER:         err = Render(in_data, out_data, params, output); break;
         case PF_Cmd_SMART_PRE_RENDER: err = SmartPreRender(in_data, out_data, (PF_PreRenderExtra*)extra); break;
         case PF_Cmd_SMART_RENDER:     err = SmartRender(in_data, out_data, (PF_SmartRenderExtra*)extra); break;
-        case PF_Cmd_SMART_RENDER_GPU: err = SmartRenderGPU(in_data, out_data, (PF_SmartRenderExtra*)extra); break;
-        case PF_Cmd_GPU_DEVICE_SETUP: err = GPUDeviceSetup(in_data, out_data, (PF_GPUDeviceSetupExtra*)extra); break;
-        case PF_Cmd_GPU_DEVICE_SETDOWN: err = GPUDeviceSetdown(in_data, out_data, (PF_GPUDeviceSetdownExtra*)extra); break;
         default: break;
         }
     }
