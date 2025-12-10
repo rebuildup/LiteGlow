@@ -1515,11 +1515,6 @@ SmartRenderGPU(
         kPFGPUDeviceSuiteVersion1,
         out_data);
 
-    if (pixel_format != PF_PixelFormat_GPU_BGRA128) {
-        // Fall back to CPU if GPU format is not what we expect.
-        return LiteGlowProcess(in_data, out_data, input_worldP, output_worldP, params, areaP);
-    }
-
     PF_GPUDeviceInfo device_info;
     ERR(gpu_suite->GetDeviceInfo(
         in_data->effect_ref,
@@ -1536,7 +1531,7 @@ SmartRenderGPU(
     gpuParams.width = input_worldP->width;
     gpuParams.height = input_worldP->height;
 
-    const A_long bytes_per_pixel = 16; // BGRA128
+    const A_long bytes_per_pixel = 16; // assume GPU 128-bit pixels
     A_long src_row_bytes = input_worldP->rowbytes;
     A_long dst_row_bytes = output_worldP->rowbytes;
 
@@ -1711,7 +1706,11 @@ SmartRender(
         ERR(world_suite->PF_GetPixelFormat(input_worldP, &pixel_format));
 
         if (!err) {
-            if (isGPU) {
+            // Prefer GPU if a device is present, even when host didn't call SMART_RENDER_GPU.
+            const bool can_gpu = (extraP->input->gpu_data != NULL &&
+                extraP->input->what_gpu == PF_GPU_Framework_DIRECTX);
+
+            if (isGPU || can_gpu) {
                 ERR(SmartRenderGPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, infoP, areaP));
             }
             else {
