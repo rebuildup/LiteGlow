@@ -388,9 +388,6 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
         // 1) Bright pass
         BrightPassInfo bp{ threshold_norm, 1.5f }; // extra gain to ensure visibility
         A_long lines = outputW->height;
-        // Acquire float iterate suite when needed
-        AEFX_SuiteHelperT<PF_IterateFloatSuite2> iterateFloat(in_data, out_data, kPFIterateFloatSuite, kPFIterateFloatSuiteVersion2);
-
         if (pixfmt == PF_PixelFormat_ARGB32) {
             ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines,
                 inputW, NULL, &bp, BrightPass8, &brightW));
@@ -400,6 +397,7 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
                 inputW, NULL, &bp, BrightPass16, &brightW));
         }
         else { // PF_PixelFormat_ARGB128
+            AEFX_SuiteHelperT<PF_IterateFloatSuite2> iterateFloat(in_data, out_data, kPFIterateFloatSuite, kPFIterateFloatSuiteVersion2);
             ERR(iterateFloat->iterate(in_data, 0, lines,
                 inputW, NULL, &bp, BrightPassF, &brightW));
         }
@@ -416,6 +414,7 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines, &brightW, NULL, &bi, BlurH16, &blurH));
         }
         else {
+            AEFX_SuiteHelperT<PF_IterateFloatSuite2> iterateFloat(in_data, out_data, kPFIterateFloatSuite, kPFIterateFloatSuiteVersion2);
             ERR(iterateFloat->iterate(in_data, 0, lines, &brightW, NULL, &bi, BlurHF, &blurH));
         }
     }
@@ -431,6 +430,7 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines, &blurH, NULL, &bi, BlurV16, &blurV));
         }
         else {
+            AEFX_SuiteHelperT<PF_IterateFloatSuite2> iterateFloat(in_data, out_data, kPFIterateFloatSuite, kPFIterateFloatSuiteVersion2);
             ERR(iterateFloat->iterate(in_data, 0, lines, &blurH, NULL, &bi, BlurVF, &blurV));
         }
     }
@@ -448,6 +448,7 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
                 inputW, NULL, &bl, BlendScreen16, outputW));
         }
         else {
+            AEFX_SuiteHelperT<PF_IterateFloatSuite2> iterateFloat(in_data, out_data, kPFIterateFloatSuite, kPFIterateFloatSuiteVersion2);
             ERR(iterateFloat->iterate(in_data, 0, lines,
                 inputW, NULL, &bl, BlendScreenF, outputW));
         }
