@@ -655,11 +655,11 @@ ExtractBrightAreas8(
         strength = base + (excess * excess * 10.0f);
     }
 
-    float threshold = gdata->threshold / 255.0f;
+    float threshold = gdata->threshold; // 0..1
     float resolution_factor = gdata->resolution_factor;
     PF_EffectWorld* input = gdata->input;
 
-    // Get perceived brightness
+    // Get perceived brightness (0..1)
     float perceivedBrightness = PerceivedBrightness8(inP) / 255.0f;
 
     // Use only brightness (edge detection removed for speed)
@@ -727,7 +727,7 @@ ExtractBrightAreas16(
         strength = base + (excess * excess * 10.0f);
     }
 
-    float threshold = gdata->threshold / 255.0f;
+    float threshold = gdata->threshold; // 0..1
     float resolution_factor = gdata->resolution_factor;
     PF_EffectWorld* input = gdata->input;
 
@@ -1166,7 +1166,7 @@ LiteGlowProcess(
         // Create glow parameters
         GlowData gdata;
         gdata.strength = strength;
-        gdata.threshold = threshold_norm * 255.0f;
+        gdata.threshold = threshold_norm; // 0..1
         gdata.input = use_scaled ? &scaled_input : inputW;
         gdata.resolution_factor = resolution_factor * (use_scaled ? downsample_scale : 1.0f);
 
