@@ -520,8 +520,30 @@ EffectMain(
         }
         break;
         case PF_Cmd_SMART_PRE_RENDER:
-            // no pre-render data needed
-            break;
+        {
+            PF_PreRenderExtra* pre = (PF_PreRenderExtra*)extra;
+            PF_RenderRequest req = pre->input->output_request;
+            PF_CheckoutResult in_result;
+
+            // Checkout input to derive rects
+            ERR(pre->cb->checkout_layer(
+                in_data->effect_ref,
+                LITEGLOW_INPUT,
+                LITEGLOW_INPUT,
+                &req,
+                in_data->current_time,
+                in_data->time_step,
+                in_data->time_scale,
+                &in_result));
+
+            // Pass through requested rectangles
+            pre->output->result_rect = in_result.result_rect;
+            pre->output->max_result_rect = in_result.max_result_rect;
+
+            // No pre-render data to keep
+            pre->output->pre_render_data = NULL;
+        }
+        break;
         default: break;
         }
     }
