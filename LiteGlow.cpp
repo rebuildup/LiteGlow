@@ -378,6 +378,13 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
         return PF_Err_BAD_CALLBACK_PARAM;
     }
 
+    PF_IterateFloatSuite2* iterateFloatSuite = NULL;
+    bool float_suite_acquired = false;
+    if (pixfmt == PF_PixelFormat_ARGB128) {
+        ERR(AEFX_AcquireSuite(in_data, out_data, kPFIterateFloatSuite, kPFIterateFloatSuiteVersion2, NULL, (void**)&iterateFloatSuite));
+        float_suite_acquired = (iterateFloatSuite != NULL);
+    }
+
     // Allocate temporary worlds
     PF_EffectWorld brightW, blurH, blurV;
     ERR(worldSuite->PF_NewWorld(in_data->effect_ref, outputW->width, outputW->height, TRUE, pixfmt, &brightW));
@@ -397,9 +404,12 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
                 inputW, NULL, &bp, BrightPass16, &brightW));
         }
         else { // PF_PixelFormat_ARGB128
-            AEFX_SuiteHelperT<PF_IterateFloatSuite2> iterateFloat(in_data, out_data, kPFIterateFloatSuite, kPFIterateFloatSuiteVersion2);
-            ERR(iterateFloat->iterate(in_data, 0, lines,
+            if (iterateFloatSuite) {
+                ERR(iterateFloatSuite->iterate(in_data, 0, lines,
                 inputW, NULL, &bp, BrightPassF, &brightW));
+            } else {
+                err = PF_Err_BAD_CALLBACK_PARAM;
+            }
         }
     }
 
@@ -414,8 +424,11 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines, &brightW, NULL, &bi, BlurH16, &blurH));
         }
         else {
-            AEFX_SuiteHelperT<PF_IterateFloatSuite2> iterateFloat(in_data, out_data, kPFIterateFloatSuite, kPFIterateFloatSuiteVersion2);
-            ERR(iterateFloat->iterate(in_data, 0, lines, &brightW, NULL, &bi, BlurHF, &blurH));
+            if (iterateFloatSuite) {
+                ERR(iterateFloatSuite->iterate(in_data, 0, lines, &brightW, NULL, &bi, BlurHF, &blurH));
+            } else {
+                err = PF_Err_BAD_CALLBACK_PARAM;
+            }
         }
     }
 
@@ -430,8 +443,11 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines, &blurH, NULL, &bi, BlurV16, &blurV));
         }
         else {
-            AEFX_SuiteHelperT<PF_IterateFloatSuite2> iterateFloat(in_data, out_data, kPFIterateFloatSuite, kPFIterateFloatSuiteVersion2);
-            ERR(iterateFloat->iterate(in_data, 0, lines, &blurH, NULL, &bi, BlurVF, &blurV));
+            if (iterateFloatSuite) {
+                ERR(iterateFloatSuite->iterate(in_data, 0, lines, &blurH, NULL, &bi, BlurVF, &blurV));
+            } else {
+                err = PF_Err_BAD_CALLBACK_PARAM;
+            }
         }
     }
 
@@ -448,9 +464,12 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
                 inputW, NULL, &bl, BlendScreen16, outputW));
         }
         else {
-            AEFX_SuiteHelperT<PF_IterateFloatSuite2> iterateFloat(in_data, out_data, kPFIterateFloatSuite, kPFIterateFloatSuiteVersion2);
-            ERR(iterateFloat->iterate(in_data, 0, lines,
+            if (iterateFloatSuite) {
+                ERR(iterateFloatSuite->iterate(in_data, 0, lines,
                 inputW, NULL, &bl, BlendScreenF, outputW));
+            } else {
+                err = PF_Err_BAD_CALLBACK_PARAM;
+            }
         }
     }
 
@@ -458,6 +477,9 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
     worldSuite->PF_DisposeWorld(in_data->effect_ref, &brightW);
     worldSuite->PF_DisposeWorld(in_data->effect_ref, &blurH);
     worldSuite->PF_DisposeWorld(in_data->effect_ref, &blurV);
+    if (float_suite_acquired && iterateFloatSuite) {
+        (void)AEFX_ReleaseSuite(in_data, out_data, kPFIterateFloatSuite, kPFIterateFloatSuiteVersion2, NULL);
+    }
 
     return err;
 }
