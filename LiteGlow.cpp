@@ -106,7 +106,13 @@ GlobalSetup(
         PF_OutFlag2_SUPPORTS_SMART_RENDER |
         PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
 
-    // GPU support: Premiere uses pixel format suite, AE uses GPU flags directly.
+    // GPU support: set the same flags the PiPL advertises so host and code agree.
+#if HAS_HLSL
+    out_data->out_flags2 |= PF_OutFlag2_SUPPORTS_GPU_RENDER_F32 |
+        PF_OutFlag2_SUPPORTS_DIRECTX_RENDERING;
+#endif
+
+    // Premiere uses pixel format suite; AE will ignore this block.
     if (in_data->appl_id == 'PrMr') {
         AEFX_SuiteScoper<PF_PixelFormatSuite1> pixelFormatSuite(
             in_data,
@@ -120,12 +126,6 @@ GlobalSetup(
             in_data->effect_ref,
             PrPixelFormat_VUYA_4444_32f);
     }
-#if HAS_HLSL
-    else {
-        out_data->out_flags2 |= PF_OutFlag2_SUPPORTS_GPU_RENDER_F32 |
-            PF_OutFlag2_SUPPORTS_DIRECTX_RENDERING;
-    }
-#endif
 
     return PF_Err_NONE;
 }
@@ -1545,6 +1545,14 @@ PreRender(
     ERR(PF_CHECKOUT_PARAM(in_data, LITEGLOW_QUALITY,
         in_data->current_time, in_data->time_step, in_data->time_scale, &cur_param));
     infoP->quality = cur_param.u.pd.value;
+
+    // Inform the host what this frame depends on for cache/GUID correctness.
+    if (extraP->cb->guidMixInPtr) {
+        ERR(extraP->cb->guidMixInPtr(
+            in_data->effect_ref,
+            infoP,
+            sizeof(LiteGlowRenderParams)));
+    }
 
     // Downsample info
     float downscale_x = static_cast<float>(in_data->downsample_x.den) / static_cast<float>(in_data->downsample_x.num);
