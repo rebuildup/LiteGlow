@@ -31,7 +31,8 @@ GlobalSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
         PF_OutFlag_DEEP_COLOR_AWARE;
 
     // Enable threaded rendering + Smart Render (8/16bpc)
-    out_data->out_flags2 = 0; // no smart render / no float
+    // Enable MFR-safe threading (no smart render, no float color aware)
+    out_data->out_flags2 = PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
 
     return PF_Err_NONE;
 }
