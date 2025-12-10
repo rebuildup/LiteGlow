@@ -31,9 +31,8 @@ GlobalSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
         PF_OutFlag_PIX_INDEPENDENT |
         PF_OutFlag_DEEP_COLOR_AWARE;
 
-    // Enable threaded rendering + Smart Render (GPUは未実装のため宣言しない)
-    out_data->out_flags2 = PF_OutFlag2_SUPPORTS_THREADED_RENDERING |
-        PF_OutFlag2_SUPPORTS_SMART_RENDER;
+    // Smart Render のみ宣言 (GPU未実装、スレッドはPiPLと合わせて未宣言)
+    out_data->out_flags2 = PF_OutFlag2_SUPPORTS_SMART_RENDER;
 
     return PF_Err_NONE;
 }
@@ -552,9 +551,6 @@ SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extra
     extraP->cb->checkin_layer_pixels(in_data->effect_ref, LITEGLOW_INPUT);
     return err;
 }
-
-static PF_Err
-// GPU モード未サポート
 
 // -------- Entry ----------
 extern "C" DllExport
