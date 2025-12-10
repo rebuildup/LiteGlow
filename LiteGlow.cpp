@@ -30,8 +30,9 @@ GlobalSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
         PF_OutFlag_PIX_INDEPENDENT |
         PF_OutFlag_DEEP_COLOR_AWARE;
 
-    // Enable threaded rendering + 32bpc awareness
+    // Enable threaded rendering + Smart Render + 32bpc awareness
     out_data->out_flags2 = PF_OutFlag2_SUPPORTS_THREADED_RENDERING |
+        PF_OutFlag2_SUPPORTS_SMART_RENDER |
         PF_OutFlag2_FLOAT_COLOR_AWARE;
 
     return PF_Err_NONE;
@@ -347,7 +348,7 @@ static PF_Err BlendScreen16(void* refcon, A_long x, A_long y, PF_Pixel16* inP, P
 
 // -------- Render --------
 static PF_Err
-Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_LayerDef* output)
+ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_EffectWorld* inputW, PF_EffectWorld* outputW)
 {
     PF_Err err = PF_Err_NONE;
     AEGP_SuiteHandler suites(in_data->pica_basicP);
@@ -367,10 +368,8 @@ Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_Layer
 
     // Early out
     if (strength_norm <= 0.0001f || radius <= 0) {
-        return PF_COPY(&params[LITEGLOW_INPUT]->u.ld, output, NULL, NULL);
+        return PF_COPY(inputW, outputW, NULL, NULL);
     }
-
-    PF_EffectWorld* inputW = &params[LITEGLOW_INPUT]->u.ld;
 
     AEFX_SuiteHelperT<PF_WorldSuite2> worldSuite(in_data, out_data, kPFWorldSuite, kPFWorldSuiteVersion2);
     PF_PixelFormat pixfmt = PF_PixelFormat_INVALID;
@@ -381,9 +380,9 @@ Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_Layer
 
     // Allocate temporary worlds
     PF_EffectWorld brightW, blurH, blurV;
-    ERR(worldSuite->PF_NewWorld(in_data->effect_ref, output->width, output->height, TRUE, pixfmt, &brightW));
-    ERR(worldSuite->PF_NewWorld(in_data->effect_ref, output->width, output->height, TRUE, pixfmt, &blurH));
-    ERR(worldSuite->PF_NewWorld(in_data->effect_ref, output->width, output->height, TRUE, pixfmt, &blurV));
+    ERR(worldSuite->PF_NewWorld(in_data->effect_ref, outputW->width, outputW->height, TRUE, pixfmt, &brightW));
+    ERR(worldSuite->PF_NewWorld(in_data->effect_ref, outputW->width, outputW->height, TRUE, pixfmt, &blurH));
+    ERR(worldSuite->PF_NewWorld(in_data->effect_ref, outputW->width, outputW->height, TRUE, pixfmt, &blurV));
 
     if (!err) {
         // 1) Bright pass
@@ -439,15 +438,15 @@ Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_Layer
         A_long lines = output->height;
         if (pixfmt == PF_PixelFormat_ARGB32) {
             ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines,
-                inputW, NULL, &bl, BlendScreen8, output));
+                inputW, NULL, &bl, BlendScreen8, outputW));
         }
         else if (pixfmt == PF_PixelFormat_ARGB64) {
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines,
-                inputW, NULL, &bl, BlendScreen16, output));
+                inputW, NULL, &bl, BlendScreen16, outputW));
         }
         else {
             ERR(suites.IterateFloatSuite2()->iterate(in_data, 0, lines,
-                inputW, NULL, &bl, BlendScreenF, output));
+                inputW, NULL, &bl, BlendScreenF, outputW));
         }
     }
 
@@ -457,6 +456,14 @@ Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_Layer
     worldSuite->PF_DisposeWorld(in_data->effect_ref, &blurV);
 
     return err;
+}
+
+static PF_Err
+Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_LayerDef* output)
+{
+    PF_EffectWorld* inputW = &params[LITEGLOW_INPUT]->u.ld;
+    PF_EffectWorld* outputW = reinterpret_cast<PF_EffectWorld*>(output);
+    return ProcessWorlds(in_data, out_data, params, inputW, outputW);
 }
 
 // -------- Entry ----------
@@ -496,6 +503,25 @@ EffectMain(
         case PF_Cmd_GLOBAL_SETUP:   err = GlobalSetup(in_data, out_data, params, output); break;
         case PF_Cmd_PARAMS_SETUP:   err = ParamsSetup(in_data, out_data, params, output); break;
         case PF_Cmd_RENDER:         err = Render(in_data, out_data, params, output); break;
+        case PF_Cmd_SMART_RENDER:
+        {
+            PF_SmartRenderExtra* extraP = (PF_SmartRenderExtra*)extra;
+            PF_EffectWorld* input_worldP = nullptr;
+            PF_EffectWorld* output_worldP = nullptr;
+
+            ERR(extraP->cb->checkout_layer_pixels(in_data->effect_ref, LITEGLOW_INPUT, &input_worldP));
+            ERR(extraP->cb->checkout_output(in_data->effect_ref, &output_worldP));
+
+            if (!err) {
+                err = ProcessWorlds(in_data, out_data, params, input_worldP, output_worldP);
+            }
+
+            extraP->cb->checkin_layer_pixels(in_data->effect_ref, LITEGLOW_INPUT);
+        }
+        break;
+        case PF_Cmd_SMART_PRE_RENDER:
+            // no pre-render data needed
+            break;
         default: break;
         }
     }
