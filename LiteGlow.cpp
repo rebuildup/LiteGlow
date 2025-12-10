@@ -614,63 +614,6 @@ static void ResampleWorldArea(
     }
 }
 
-// Edge detection using Sobel operators
-inline float EdgeStrength8(PF_EffectWorld* world, int x, int y) {
-    const int sobel_x[3][3] = {
-        {-1, 0, 1},
-        {-2, 0, 2},
-        {-1, 0, 1}
-    };
-
-    const int sobel_y[3][3] = {
-        {-1, -2, -1},
-        {0, 0, 0},
-        {1, 2, 1}
-    };
-
-    float gx = 0.0f, gy = 0.0f;
-
-    for (int j = -1; j <= 1; j++) {
-        for (int i = -1; i <= 1; i++) {
-            PF_Pixel8* p = GetPixel8(world, x + i, y + j);
-            float brightness = PerceivedBrightness8(p);
-
-            gx += brightness * sobel_x[j + 1][i + 1];
-            gy += brightness * sobel_y[j + 1][i + 1];
-        }
-    }
-
-    return sqrt(gx * gx + gy * gy);
-}
-
-inline float EdgeStrength16(PF_EffectWorld* world, int x, int y) {
-    const int sobel_x[3][3] = {
-        {-1, 0, 1},
-        {-2, 0, 2},
-        {-1, 0, 1}
-    };
-
-    const int sobel_y[3][3] = {
-        {-1, -2, -1},
-        {0, 0, 0},
-        {1, 2, 1}
-    };
-
-    float gx = 0.0f, gy = 0.0f;
-
-    for (int j = -1; j <= 1; j++) {
-        for (int i = -1; i <= 1; i++) {
-            PF_Pixel16* p = GetPixel16(world, x + i, y + j);
-            float brightness = PerceivedBrightness16(p);
-
-            gx += brightness * sobel_x[j + 1][i + 1];
-            gy += brightness * sobel_y[j + 1][i + 1];
-        }
-    }
-
-    return sqrt(gx * gx + gy * gy);
-}
-
 // Generate 1D Gaussian kernel
 void GenerateGaussianKernel(float sigma, float* kernel, int* radius) {
     *radius = MIN(KERNEL_SIZE_MAX / 2, (int)(3.0f * sigma + 0.5f));
@@ -719,27 +662,8 @@ ExtractBrightAreas8(
     // Get perceived brightness
     float perceivedBrightness = PerceivedBrightness8(inP) / 255.0f;
 
-    // Edge detection based on resolution factor
-    float edgeStrength = 0.0f;
-    if (resolution_factor > 0.5f) {
-        // Full quality edge detection
-        edgeStrength = EdgeStrength8(input, xL, yL) / 255.0f;
-    }
-    else {
-        // Simplified edge detection for preview
-        float leftBrightness = PerceivedBrightness8(GetPixel8(input, xL - 1, yL)) / 255.0f;
-        float rightBrightness = PerceivedBrightness8(GetPixel8(input, xL + 1, yL)) / 255.0f;
-        float topBrightness = PerceivedBrightness8(GetPixel8(input, xL, yL - 1)) / 255.0f;
-        float bottomBrightness = PerceivedBrightness8(GetPixel8(input, xL, yL + 1)) / 255.0f;
-
-        float dx = (rightBrightness - leftBrightness) * 0.5f;
-        float dy = (bottomBrightness - topBrightness) * 0.5f;
-
-        edgeStrength = sqrtf(dx * dx + dy * dy) * 2.0f;
-    }
-
-    // Combine brightness and edge detection
-    float intensity = MAX(perceivedBrightness, edgeStrength * 0.5f);
+    // Use only brightness (edge detection removed for speed)
+    float intensity = perceivedBrightness;
 
     // Apply threshold with smooth falloff
     float threshold_falloff = 0.1f;
@@ -810,27 +734,8 @@ ExtractBrightAreas16(
     // Get perceived brightness
     float perceivedBrightness = PerceivedBrightness16(inP) / 32768.0f;
 
-    // Edge detection based on resolution factor
-    float edgeStrength = 0.0f;
-    if (resolution_factor > 0.5f) {
-        // Full quality edge detection
-        edgeStrength = EdgeStrength16(input, xL, yL) / 32768.0f;
-    }
-    else {
-        // Simplified edge detection for preview
-        float leftBrightness = PerceivedBrightness16(GetPixel16(input, xL - 1, yL)) / 32768.0f;
-        float rightBrightness = PerceivedBrightness16(GetPixel16(input, xL + 1, yL)) / 32768.0f;
-        float topBrightness = PerceivedBrightness16(GetPixel16(input, xL, yL - 1)) / 32768.0f;
-        float bottomBrightness = PerceivedBrightness16(GetPixel16(input, xL, yL + 1)) / 32768.0f;
-
-        float dx = (rightBrightness - leftBrightness) * 0.5f;
-        float dy = (bottomBrightness - topBrightness) * 0.5f;
-
-        edgeStrength = sqrtf(dx * dx + dy * dy) * 2.0f;
-    }
-
-    // Combine brightness and edge detection
-    float intensity = MAX(perceivedBrightness, edgeStrength * 0.5f);
+    // Use only brightness (edge detection removed for speed)
+    float intensity = perceivedBrightness;
 
     // Apply threshold with smooth falloff
     float threshold_falloff = 0.1f;
@@ -1210,13 +1115,8 @@ LiteGlowProcess(
         is_deep,
         &blur_v_world));
 
-    float downsample_scale = 1.0f;
-    if (adjusted_radius > 48.0f) {
-        downsample_scale = 0.25f;
-    }
-    else if (adjusted_radius > 24.0f) {
-        downsample_scale = 0.5f;
-    }
+    // Force aggressive downsample for speed; quality is preserved by later blend.
+    float downsample_scale = 0.25f;
 
     PF_LRect scaled_area = { 0, 0, 0, 0 };
     PF_Boolean use_scaled = (downsample_scale < 1.0f);
@@ -1408,63 +1308,7 @@ LiteGlowProcess(
                         blur_v_dest));
                 }
 
-                if (quality == QUALITY_HIGH && !err && strength > 500.0f && resolution_factor > 0.9f) {
-                    PF_EffectWorld* extra_world = use_scaled ? &scaled_bright : &bright_world;
-                    bdata.input = blur_v_dest;
-
-                    PF_LRect extra_area = use_scaled ? scaled_area : work_area;
-                    A_long extra_lines = extra_area.bottom - extra_area.top;
-
-                    if (is_deep) {
-                        ERR(suites.Iterate16Suite2()->iterate(
-                            in_data,
-                            0,
-                            extra_lines,
-                            blur_v_dest,
-                            &extra_area,
-                            (void*)&bdata,
-                            GaussianBlurH16,
-                            extra_world));
-                    }
-                    else {
-                        ERR(suites.Iterate8Suite2()->iterate(
-                            in_data,
-                            0,
-                            extra_lines,
-                            blur_v_dest,
-                            &extra_area,
-                            (void*)&bdata,
-                            GaussianBlurH8,
-                            extra_world));
-                    }
-
-                    if (!err) {
-                        bdata.input = extra_world;
-
-                        if (is_deep) {
-                            ERR(suites.Iterate16Suite2()->iterate(
-                                in_data,
-                                0,
-                                blur_v_lines,
-                                extra_world,
-                                &extra_area,
-                                (void*)&bdata,
-                                GaussianBlurV16,
-                                blur_v_dest));
-                        }
-                        else {
-                            ERR(suites.Iterate8Suite2()->iterate(
-                                in_data,
-                                0,
-                                blur_v_lines,
-                                extra_world,
-                                &extra_area,
-                                (void*)&bdata,
-                                GaussianBlurV8,
-                                blur_v_dest));
-                        }
-                    }
-                }
+                // Removed extra high-quality double-pass blur for speed
 
                 if (use_scaled) {
                     ResampleWorldArea(&scaled_blur_v, &blur_v_world, is_deep, work_area);
