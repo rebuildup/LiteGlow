@@ -1115,8 +1115,8 @@ LiteGlowProcess(
         is_deep,
         &blur_v_world));
 
-    // Force aggressive downsample for speed; quality is preserved by later blend.
-    float downsample_scale = 0.25f;
+    // Balanced downsample: 0.5 keeps detail while cutting cost to 1/4 pixels.
+    float downsample_scale = 0.5f;
 
     PF_LRect scaled_area = { 0, 0, 0, 0 };
     PF_Boolean use_scaled = (downsample_scale < 1.0f);
@@ -1706,14 +1706,11 @@ SmartRender(
         ERR(world_suite->PF_GetPixelFormat(input_worldP, &pixel_format));
 
         if (!err) {
-            // Prefer GPU if a device is present, even when host didn't call SMART_RENDER_GPU.
-            const bool can_gpu = (extraP->input->gpu_data != NULL &&
-                extraP->input->what_gpu == PF_GPU_Framework_DIRECTX);
-
-            if (isGPU || can_gpu) {
+            if (isGPU && pixel_format == PF_PixelFormat_GPU_BGRA128) {
                 ERR(SmartRenderGPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, infoP, areaP));
             }
             else {
+                // Host may not call SMART_RENDER_GPU; fall back to CPU unless we truly have GPU pixels.
                 ERR(SmartRenderCPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, infoP, areaP));
             }
         }
