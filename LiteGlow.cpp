@@ -1539,8 +1539,8 @@ SmartRenderGPU(
     gpuParams.dstPitch = (int)(dst_row_bytes / bytes_per_pixel);
 
     // Convert effect parameters from pre-render cache
-    gpuParams.strength = params->strength / (float)STRENGTH_MAX;
-    gpuParams.threshold = params->threshold; // already 0..1
+    gpuParams.strength = params->strength;            // send absolute slider value (0..2000)
+    gpuParams.threshold = params->threshold;          // 0..1
     gpuParams.radius = params->radius;
     gpuParams.quality = params->quality;
 

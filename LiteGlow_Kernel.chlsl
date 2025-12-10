@@ -4,7 +4,7 @@ cbuffer LiteGlowGPUParams : register(b0)
     int   dstPitch;
     int   width;
     int   height;
-    float strengthNorm;
+    float strength;   // absolute strength slider value (0..2000)
     float threshold;
     float radius;
     int   quality;
@@ -47,12 +47,6 @@ void main(uint3 dtid : SV_DispatchThreadID)
 
     float baseLuma = dot(basePixel.rgb, kLumaWeights);
     float mask = saturate((baseLuma - threshold) * 4.0f);
-
-    if (mask <= 0.0f || strengthNorm <= 0.01f)
-    {
-        StorePixel(x, y, basePixel);
-        return;
-    }
 
     const int SAMPLES_PER_DIR = 4;
     float rad = max(radius, 1.0f);
@@ -101,7 +95,11 @@ void main(uint3 dtid : SV_DispatchThreadID)
     }
 
     float3 glow = accum / totalW;
-    glow *= saturate(0.5f + strengthNorm * 1.5f);
+
+    // Strength remap: slider 0..2000 -> 0..1.0 scale
+    float strengthScale = saturate(strength * 0.0005f); // 2000 -> 1.0
+    float gain = lerp(0.35f, 2.2f, strengthScale);
+    glow *= gain;
     glow = saturate(glow);
 
     float3 screenColor = 1.0f - (1.0f - basePixel.rgb) * (1.0f - glow);
