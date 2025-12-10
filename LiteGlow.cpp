@@ -6,6 +6,7 @@
 
 // Simple, reliable CPU-only glow rebuilt from Skeleton template.
 // Keeps existing UI: Strength, Radius, Threshold, Quality.
+#include <cstdlib>
 
 static PF_Err
 About(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_LayerDef* output)
@@ -348,16 +349,23 @@ static PF_Err BlendScreen16(void* refcon, A_long x, A_long y, PF_Pixel16* inP, P
 }
 
 // -------- Render --------
+typedef struct {
+    float strength;
+    float radius;
+    float threshold;
+    int   quality;
+} LiteGlowSettings;
+
 static PF_Err
-ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_EffectWorld* inputW, PF_EffectWorld* outputW)
+ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, const LiteGlowSettings& settings, PF_EffectWorld* inputW, PF_EffectWorld* outputW)
 {
     PF_Err err = PF_Err_NONE;
     AEGP_SuiteHandler suites(in_data->pica_basicP);
 
-    const float strength_slider = params[LITEGLOW_STRENGTH]->u.fs_d.value; // 0..2000
-    const float radius_slider = params[LITEGLOW_RADIUS]->u.fs_d.value;     // 1..50
-    const float threshold_slider = params[LITEGLOW_THRESHOLD]->u.fs_d.value; // 0..255
-    const int quality = params[LITEGLOW_QUALITY]->u.pd.value;
+    const float strength_slider = settings.strength; // 0..2000
+    const float radius_slider = settings.radius;     // 1..50
+    const float threshold_slider = settings.threshold; // 0..255
+    const int quality = settings.quality;
 
     // Normalize values
     float strength_norm = strength_slider / 2000.0f; // 0..1
@@ -459,7 +467,12 @@ Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_Layer
 {
     PF_EffectWorld* inputW = &params[LITEGLOW_INPUT]->u.ld;
     PF_EffectWorld* outputW = reinterpret_cast<PF_EffectWorld*>(output);
-    return ProcessWorlds(in_data, out_data, params, inputW, outputW);
+    LiteGlowSettings s;
+    s.strength = params[LITEGLOW_STRENGTH]->u.fs_d.value;
+    s.radius = params[LITEGLOW_RADIUS]->u.fs_d.value;
+    s.threshold = params[LITEGLOW_THRESHOLD]->u.fs_d.value;
+    s.quality = params[LITEGLOW_QUALITY]->u.pd.value;
+    return ProcessWorlds(in_data, out_data, s, inputW, outputW);
 }
 
 // ---- Smart Render helpers (safe CPU fallback) ----
@@ -484,7 +497,26 @@ SmartPreRender(PF_InData* in_data, PF_OutData* out_data, PF_PreRenderExtra* pre)
 
     pre->output->result_rect = in_result.result_rect;
     pre->output->max_result_rect = in_result.max_result_rect;
-    pre->output->pre_render_data = NULL;
+    // Cache params we need for SmartRender
+    LiteGlowSettings* s = (LiteGlowSettings*)malloc(sizeof(LiteGlowSettings));
+    if (s) {
+        PF_ParamDef cur;
+        AEFX_CLR_STRUCT(cur);
+        ERR(PF_CHECKOUT_PARAM(in_data, LITEGLOW_STRENGTH, in_data->current_time, in_data->time_step, in_data->time_scale, &cur));
+        s->strength = cur.u.fs_d.value;
+        AEFX_CLR_STRUCT(cur);
+        ERR(PF_CHECKOUT_PARAM(in_data, LITEGLOW_RADIUS, in_data->current_time, in_data->time_step, in_data->time_scale, &cur));
+        s->radius = cur.u.fs_d.value;
+        AEFX_CLR_STRUCT(cur);
+        ERR(PF_CHECKOUT_PARAM(in_data, LITEGLOW_THRESHOLD, in_data->current_time, in_data->time_step, in_data->time_scale, &cur));
+        s->threshold = cur.u.fs_d.value;
+        AEFX_CLR_STRUCT(cur);
+        ERR(PF_CHECKOUT_PARAM(in_data, LITEGLOW_QUALITY, in_data->current_time, in_data->time_step, in_data->time_scale, &cur));
+        s->quality = cur.u.pd.value;
+        pre->output->pre_render_data = s;
+    } else {
+        pre->output->pre_render_data = NULL;
+    }
 
     return err;
 }
@@ -500,7 +532,13 @@ SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extra
     ERR(extraP->cb->checkout_output(in_data->effect_ref, &output_worldP));
 
     if (!err) {
-        err = ProcessWorlds(in_data, out_data, extraP->input->params, input_worldP, output_worldP);
+        LiteGlowSettings* s = reinterpret_cast<LiteGlowSettings*>(extraP->input->pre_render_data);
+        if (s) {
+            err = ProcessWorlds(in_data, out_data, *s, input_worldP, output_worldP);
+            free(s);
+        } else {
+            err = PF_Err_BAD_CALLBACK_PARAM;
+        }
     }
 
     extraP->cb->checkin_layer_pixels(in_data->effect_ref, LITEGLOW_INPUT);
