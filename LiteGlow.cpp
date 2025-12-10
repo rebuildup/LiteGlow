@@ -4,6 +4,14 @@
 #include "PrSDKAESupport.h"
 #include "Smart_Utils.h"
 
+#include <type_traits>
+
+// Utility trait: detect presence of guidMixInPtr in PF_PreRenderCallbacks
+template <typename T, typename = void>
+struct has_guidMixInPtr : std::false_type {};
+template <typename T>
+struct has_guidMixInPtr<T, std::void_t<decltype(&T::guidMixInPtr)>> : std::true_type {};
+
 #ifdef AE_OS_WIN
     #include "DirectXUtils.h"
 #endif
@@ -1547,11 +1555,13 @@ PreRender(
     infoP->quality = cur_param.u.pd.value;
 
     // Inform the host what this frame depends on for cache/GUID correctness.
-    if (extraP->cb->guidMixInPtr) {
-        ERR(extraP->cb->guidMixInPtr(
-            in_data->effect_ref,
-            infoP,
-            sizeof(LiteGlowRenderParams)));
+    if constexpr (has_guidMixInPtr<PF_PreRenderCallbacks>::value) {
+        if (extraP->cb->guidMixInPtr) {
+            ERR(extraP->cb->guidMixInPtr(
+                in_data->effect_ref,
+                infoP,
+                sizeof(LiteGlowRenderParams)));
+        }
     }
 
     // Downsample info
