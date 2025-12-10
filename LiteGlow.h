@@ -36,6 +36,7 @@
 #define BUG_VERSION          0
 #define STAGE_VERSION        PF_Stage_DEVELOP
 #define BUILD_VERSION        1
+#define LITEGLOW_VERSION_VALUE 528385
 
 #define STRENGTH_MIN       0
 #define STRENGTH_MAX       2000

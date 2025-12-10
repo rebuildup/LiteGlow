@@ -34,14 +34,15 @@ resource 'PiPL' (16000) {
             PF_PLUG_IN_VERSION,
             PF_PLUG_IN_SUBVERS
         },
+        #define LITEGLOW_VERSION_VALUE 528385
         AE_Effect_Version {
-            528385
+            LITEGLOW_VERSION_VALUE
         },
         AE_Effect_Info_Flags {
             0
         },
         AE_Effect_Global_OutFlags {
-            0x02000400  // PF_OutFlag_DEEP_COLOR_AWARE | PF_OutFlag_PIX_INDEPENDENT
+            0x02000000  // PF_OutFlag_PIX_INDEPENDENT
         },
         AE_Effect_Global_OutFlags_2 {
             0x08000000  // PF_OutFlag2_SUPPORTS_THREADED_RENDERING
