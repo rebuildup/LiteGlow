@@ -387,7 +387,7 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
     if (!err) {
         // 1) Bright pass
         BrightPassInfo bp{ threshold_norm, 1.5f }; // extra gain to ensure visibility
-        A_long lines = output->height;
+        A_long lines = outputW->height;
         if (pixfmt == PF_PixelFormat_ARGB32) {
             ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines,
                 inputW, NULL, &bp, BrightPass8, &brightW));
@@ -405,7 +405,7 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
     if (!err) {
         // 2) Blur horizontal
         BlurInfo bi{ &brightW, radius };
-        A_long lines = output->height;
+        A_long lines = outputW->height;
         if (pixfmt == PF_PixelFormat_ARGB32) {
             ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines, &brightW, NULL, &bi, BlurH8, &blurH));
         }
@@ -420,7 +420,7 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
     if (!err) {
         // 3) Blur vertical
         BlurInfo bi{ &blurH, radius };
-        A_long lines = output->height;
+        A_long lines = outputW->height;
         if (pixfmt == PF_PixelFormat_ARGB32) {
             ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines, &blurH, NULL, &bi, BlurV8, &blurV));
         }
@@ -435,7 +435,7 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
     if (!err) {
         // 4) Screen blend
         BlendInfo bl{ &blurV, MAX(0.1f, strength_norm * 2.0f) };
-        A_long lines = output->height;
+        A_long lines = outputW->height;
         if (pixfmt == PF_PixelFormat_ARGB32) {
             ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines,
                 inputW, NULL, &bl, BlendScreen8, outputW));
