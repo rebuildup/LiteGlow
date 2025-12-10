@@ -1811,34 +1811,7 @@ PreRender(
     extraP->output->pre_render_data = infoP;
     extraP->output->delete_pre_render_data_func = DisposePreRenderData;
 
-    // ------------------------------------------------------------------
-    // ROI tightening: expand only by the blur kernel footprint so AE will
-    // allocate/checkout the minimum rectangle for SmartFX processing.
-    // ------------------------------------------------------------------
-    const float adjusted_radius =
-        (infoP->resolution_factor < 0.9f)
-        ? infoP->radius * MAX(0.5f, infoP->resolution_factor)
-        : infoP->radius;
-
-    float sigma = adjusted_radius;
-    switch (infoP->quality) {
-    case QUALITY_LOW:    sigma = adjusted_radius * 0.5f; break;
-    case QUALITY_MEDIUM: sigma = adjusted_radius * 0.75f; break;
-    case QUALITY_HIGH:
-    default:             sigma = adjusted_radius; break;
-    }
-
-    int kernel_radius = MIN(KERNEL_SIZE_MAX / 2, (int)(3.0f * sigma + 0.5f));
-    const A_long margin = (A_long)MAX(1, kernel_radius); // safe expansion per axis
-
-    PF_LRect requested = req.rect;
-    requested.left   -= margin;
-    requested.top    -= margin;
-    requested.right  += margin;
-    requested.bottom += margin;
-    req.rect = requested;
-
-    // Checkout input to compute (clipped) result rectangles
+    // Checkout input to compute result rectangles
     ERR(extraP->cb->checkout_layer(
         in_data->effect_ref,
         LITEGLOW_INPUT,
@@ -1870,7 +1843,7 @@ SmartRender(
 
     LiteGlowRenderParams* infoP =
         reinterpret_cast<LiteGlowRenderParams*>(extraP->input->pre_render_data);
-    const PF_LRect* areaP = &extraP->output->result_rect;
+    const PF_LRect* areaP = NULL; // process full frame to avoid request/result mismatch errors
 
     if (!infoP) {
         return PF_Err_INTERNAL_STRUCT_DAMAGED;
