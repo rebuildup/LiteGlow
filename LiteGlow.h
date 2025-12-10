@@ -34,12 +34,12 @@
 #include "LiteGlow_Version.h"
 
 #define STRENGTH_MIN       0
-#define STRENGTH_MAX       10000
-#define STRENGTH_DFLT      1000
+#define STRENGTH_MAX       2000
+#define STRENGTH_DFLT      800
 
 #define RADIUS_MIN         1
-#define RADIUS_MAX         100
-#define RADIUS_DFLT        20
+#define RADIUS_MAX         50
+#define RADIUS_DFLT        10
 
 #define THRESHOLD_MIN      0
 #define THRESHOLD_MAX      255

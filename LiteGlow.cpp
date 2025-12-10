@@ -46,7 +46,7 @@ typedef struct
     int   dstPitch;
     int   width;
     int   height;
-    float strengthNorm;
+    float strength;
     float threshold;
     float radius;
     int   quality;
@@ -101,22 +101,11 @@ GlobalSetup(
         PF_OutFlag_PIX_INDEPENDENT |
         PF_OutFlag_SEND_UPDATE_PARAMS_UI;
 
-    // Smart Render + threaded rendering + 32-bit float aware + GPU bits.
-    // PiPLと一致させるため、明示的に値を設定（0x08301400）
-    // I_MIX_GUID_DEPENDENCIES (0x02000000) は含めない - GuidMixInPtrは不要
-    const PF_OutFlags2 kOutFlags2Code = 0x08301400;
+    // Smart Render + threaded rendering.
+    out_data->out_flags2 = PF_OutFlag2_SUPPORTS_SMART_RENDER |
+        PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
 
-    out_data->out_flags2 = kOutFlags2Code;
-
-#if defined(_DEBUG)
-    {
-        char dbg[128];
-        snprintf(dbg, sizeof(dbg), "LiteGlow GlobalSetup out_flags2=0x%08X\n", (unsigned)kOutFlags2Code);
-        OutputDebugStringA(dbg);
-    }
-#endif
-
-    // Premiere uses pixel format suite; AE will ignore this block.
+    // GPU support: Premiere uses pixel format suite, AE uses GPU flags directly.
     if (in_data->appl_id == 'PrMr') {
         AEFX_SuiteScoper<PF_PixelFormatSuite1> pixelFormatSuite(
             in_data,
@@ -130,6 +119,12 @@ GlobalSetup(
             in_data->effect_ref,
             PrPixelFormat_VUYA_4444_32f);
     }
+#if HAS_HLSL
+    else {
+        out_data->out_flags2 |= PF_OutFlag2_SUPPORTS_GPU_RENDER_F32 |
+            PF_OutFlag2_SUPPORTS_DIRECTX_RENDERING;
+    }
+#endif
 
     return PF_Err_NONE;
 }
@@ -468,13 +463,15 @@ ExtractBrightAreas8(
 {
     GlowDataP gdata = reinterpret_cast<GlowDataP>(refcon);
 
-    // Scale strength for more powerful effect (0-10000 range)
-    float strength = gdata->strength / 1000.0f;
-    
-    // 非線形カーブを適用して高強度でより効果的に
-    if (strength > 5.0f) {
-        float excess = (strength - 5.0f) / 5.0f; // 0-1 range for 5000-10000
-        strength = 5.0f + (excess * excess * 15.0f); // 最大20倍の強度
+    // Scale strength for more powerful effect
+    float strength = 0.0f;
+    if (gdata->strength <= 3000.0f) {
+        strength = gdata->strength / 1000.0f;
+    }
+    else {
+        float base = 3.0f;
+        float excess = (gdata->strength - 3000.0f) / 7000.0f;
+        strength = base + (excess * excess * 10.0f);
     }
 
     float threshold = gdata->threshold / 255.0f;
@@ -557,13 +554,15 @@ ExtractBrightAreas16(
 {
     GlowDataP gdata = reinterpret_cast<GlowDataP>(refcon);
 
-    // Scale strength for more powerful effect (0-10000 range)
-    float strength = gdata->strength / 1000.0f;
-    
-    // 非線形カーブを適用して高強度でより効果的に
-    if (strength > 5.0f) {
-        float excess = (strength - 5.0f) / 5.0f; // 0-1 range for 5000-10000
-        strength = 5.0f + (excess * excess * 15.0f); // 最大20倍の強度
+    // Scale strength for more powerful effect
+    float strength = 0.0f;
+    if (gdata->strength <= 3000.0f) {
+        strength = gdata->strength / 1000.0f;
+    }
+    else {
+        float base = 3.0f;
+        float excess = (gdata->strength - 3000.0f) / 7000.0f;
+        strength = base + (excess * excess * 10.0f);
     }
 
     float threshold = gdata->threshold / 255.0f;
@@ -793,7 +792,7 @@ BlendGlow8(
     PF_Pixel8* glowP = GetPixel8(glowWorld, xL, yL);
 
     // Enhanced blending logic
-    if (quality == QUALITY_HIGH || strength > 2000.0f) {
+    if (quality == QUALITY_HIGH || strength > 3000.0f) {
         // Screen blend with additional highlight preservation
         float rs = 1.0f - ((1.0f - inP->red / 255.0f) * (1.0f - glowP->red / 255.0f));
         float gs = 1.0f - ((1.0f - inP->green / 255.0f) * (1.0f - glowP->green / 255.0f));
@@ -802,11 +801,9 @@ BlendGlow8(
         // Add highlight boost where glow is concentrated
         float glow_intensity = (glowP->red + glowP->green + glowP->blue) / (3.0f * 255.0f);
 
-        // Scale highlight boost with strength (0-10000 range)
-        float highlight_factor = 0.2f;
-        if (strength > 2000.0f) {
-            highlight_factor = 0.2f + ((strength - 2000.0f) / 8000.0f) * 0.6f;
-        }
+        // Scale highlight boost with strength
+        float highlight_factor = (strength > 3000.0f) ?
+            0.2f + ((strength - 3000.0f) / 7000.0f) * 0.4f : 0.2f;
 
         float highlight_boost = 1.0f + glow_intensity * highlight_factor;
 
@@ -817,7 +814,7 @@ BlendGlow8(
 
         // For extreme high strength (> 7000), add extra glow intensity boost
         if (strength > 7000.0f) {
-            float extreme_boost = ((strength - 7000.0f) / 3000.0f) * 0.5f;
+            float extreme_boost = (strength - 7000.0f) / 3000.0f * 0.5f;
             outP->red = (A_u_char)MIN(255.0f, outP->red * (1.0f + extreme_boost));
             outP->green = (A_u_char)MIN(255.0f, outP->green * (1.0f + extreme_boost));
             outP->blue = (A_u_char)MIN(255.0f, outP->blue * (1.0f + extreme_boost));
@@ -854,7 +851,7 @@ BlendGlow16(
     PF_Pixel16* glowP = GetPixel16(glowWorld, xL, yL);
 
     // Enhanced blending logic
-    if (quality == QUALITY_HIGH || strength > 2000.0f) {
+    if (quality == QUALITY_HIGH || strength > 3000.0f) {
         // Screen blend with additional highlight preservation
         float rs = 1.0f - ((1.0f - inP->red / 32768.0f) * (1.0f - glowP->red / 32768.0f));
         float gs = 1.0f - ((1.0f - inP->green / 32768.0f) * (1.0f - glowP->green / 32768.0f));
@@ -863,11 +860,9 @@ BlendGlow16(
         // Add highlight boost where glow is concentrated
         float glow_intensity = (glowP->red + glowP->green + glowP->blue) / (3.0f * 32768.0f);
 
-        // Scale highlight boost with strength (0-10000 range)
-        float highlight_factor = 0.2f;
-        if (strength > 2000.0f) {
-            highlight_factor = 0.2f + ((strength - 2000.0f) / 8000.0f) * 0.6f;
-        }
+        // Scale highlight boost with strength
+        float highlight_factor = (strength > 3000.0f) ?
+            0.2f + ((strength - 3000.0f) / 7000.0f) * 0.4f : 0.2f;
 
         float highlight_boost = 1.0f + glow_intensity * highlight_factor;
 
@@ -878,7 +873,7 @@ BlendGlow16(
 
         // For extreme high strength (> 7000), add extra glow intensity boost
         if (strength > 7000.0f) {
-            float extreme_boost = ((strength - 7000.0f) / 3000.0f) * 0.5f;
+            float extreme_boost = (strength - 7000.0f) / 3000.0f * 0.5f;
             outP->red = (A_u_short)MIN(32768.0f, outP->red * (1.0f + extreme_boost));
             outP->green = (A_u_short)MIN(32768.0f, outP->green * (1.0f + extreme_boost));
             outP->blue = (A_u_short)MIN(32768.0f, outP->blue * (1.0f + extreme_boost));
@@ -1313,6 +1308,7 @@ GPUDeviceSetup(
             dx_gpu_data->glowShader));
 
         extraP->output->gpu_data = gpu_dataH;
+        out_data->out_flags2 |= PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
     }
 
     return err;
@@ -1399,24 +1395,9 @@ SmartRenderGPU(
         kPFGPUDeviceSuiteVersion1,
         out_data);
 
-#if defined(_DEBUG)
-    {
-        char dbg[256];
-        snprintf(dbg, sizeof(dbg),
-            "LiteGlow SmartRenderGPU enter pf=%d what_gpu=%d gpu_data=%p\n",
-            pixel_format,
-            extraP->input->what_gpu,
-            extraP->input->gpu_data);
-        OutputDebugStringA(dbg);
-    }
-#endif
-
-    // Only support DirectX BGRA128 GPU worlds. If the host gives us
-    // something else for this frame, signal the caller to fall back to CPU.
-    if (pixel_format != PF_PixelFormat_GPU_BGRA128 ||
-        extraP->input->what_gpu != PF_GPU_Framework_DIRECTX ||
-        !extraP->input->gpu_data) {
-        return PF_Err_UNRECOGNIZED_PARAM_TYPE;
+    if (pixel_format != PF_PixelFormat_GPU_BGRA128) {
+        // Fall back to CPU if GPU format is not what we expect.
+        return LiteGlowProcess(in_data, out_data, input_worldP, output_worldP, params);
     }
 
     PF_GPUDeviceInfo device_info;
@@ -1443,7 +1424,7 @@ SmartRenderGPU(
     gpuParams.dstPitch = (int)(dst_row_bytes / bytes_per_pixel);
 
     // Convert effect parameters from pre-render cache
-    gpuParams.strengthNorm = params->strength / (float)STRENGTH_MAX;
+    gpuParams.strength = params->strength / (float)STRENGTH_MAX;
     gpuParams.threshold = params->threshold; // already 0..1
     gpuParams.radius = params->radius;
     gpuParams.quality = params->quality;
@@ -1469,9 +1450,6 @@ SmartRenderGPU(
         DX_ERR(shaderExecution.Execute(
             (UINT)DivideRoundUpSizeT((size_t)gpuParams.width, 16),
             (UINT)DivideRoundUpSizeT((size_t)gpuParams.height, 16)));
-#if defined(_DEBUG)
-        OutputDebugStringA("LiteGlow SmartRenderGPU: dispatched DX compute\n");
-#endif
     }
     else {
         // Unsupported GPU framework – fall back to CPU implementation.
@@ -1549,9 +1527,6 @@ PreRender(
         in_data->current_time, in_data->time_step, in_data->time_scale, &cur_param));
     infoP->quality = cur_param.u.pd.value;
 
-    // Inform the host what this frame depends on for cache/GUID correctness.
-    // GuidMixInPtr is not required because we do not advertise I_MIX_GUID_DEPENDENCIES.
-
     // Downsample info
     float downscale_x = static_cast<float>(in_data->downsample_x.den) / static_cast<float>(in_data->downsample_x.num);
     float downscale_y = static_cast<float>(in_data->downsample_y.den) / static_cast<float>(in_data->downsample_y.num);
@@ -1614,47 +1589,10 @@ SmartRender(
 
         if (!err) {
             if (isGPU) {
-                // Try GPU path first; if it fails for any reason,
-                // fall back to the CPU implementation.
-                PF_Err gpu_err = SmartRenderGPU(
-                    in_data,
-                    out_data,
-                    pixel_format,
-                    input_worldP,
-                    output_worldP,
-                    extraP,
-                    infoP);
-
-#if defined(_DEBUG)
-                {
-                    char dbg[128];
-                    snprintf(dbg, sizeof(dbg),
-                        "LiteGlow SmartRender: GPU attempt -> %d\n",
-                        gpu_err);
-                    OutputDebugStringA(dbg);
-                }
-#endif
-
-                if (gpu_err != PF_Err_NONE) {
-                    err = SmartRenderCPU(
-                        in_data,
-                        out_data,
-                        pixel_format,
-                        input_worldP,
-                        output_worldP,
-                        extraP,
-                        infoP);
-                }
+                ERR(SmartRenderGPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, infoP));
             }
             else {
-                err = SmartRenderCPU(
-                    in_data,
-                    out_data,
-                    pixel_format,
-                    input_worldP,
-                    output_worldP,
-                    extraP,
-                    infoP);
+                ERR(SmartRenderCPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, infoP));
             }
         }
     }
