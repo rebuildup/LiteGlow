@@ -28,6 +28,7 @@ GlobalSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
         PF_OutFlag_DEEP_COLOR_AWARE |
         PF_OutFlag_PIX_INDEPENDENT;
 
+    // Match PiPL: threaded render only
     out_data->out_flags2 =
         PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
 

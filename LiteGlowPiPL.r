@@ -34,10 +34,8 @@ resource 'PiPL' (16000) {
             PF_PLUG_IN_VERSION,
             PF_PLUG_IN_SUBVERS
         },
-        // Keep version in sync with LiteGlow.cpp
-        #define LITEGLOW_VERSION PF_VERSION(1,0,0,PF_Stage_DEVELOP,1)
         AE_Effect_Version {
-            LITEGLOW_VERSION
+            528385
         },
         AE_Effect_Info_Flags {
             0
