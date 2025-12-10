@@ -7,6 +7,8 @@
 #ifdef AE_OS_WIN
     #include "DirectXUtils.h"
     #include <d3dcompiler.h>
+    #include <d3d12.h>
+    #pragma comment(lib, "d3d12.lib")
 #endif
 
 #include <math.h>
