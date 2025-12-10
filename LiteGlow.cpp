@@ -6,9 +6,11 @@
 
 #ifdef AE_OS_WIN
     #include "DirectXUtils.h"
+    #include <d3dcompiler.h>
 #endif
 
 #include <math.h>
+#include <string.h>
 
 // Constants for Gaussian kernel generation
 #define PI 3.14159265358979323846
@@ -62,6 +64,203 @@ static size_t
 DivideRoundUpSizeT(size_t value, size_t multiple)
 {
     return value ? (value + multiple - 1) / multiple : 0;
+}
+
+// Fallback: compile embedded HLSL when external CSO/RS files are missing.
+static bool CompileEmbeddedLiteGlowShader(const DXContextPtr& ctx, const ShaderObjectPtr& shader)
+{
+    static const char* kLiteGlowHLSL = R"(cbuffer LiteGlowGPUParams : register(b0)
+{
+    int   srcPitch;
+    int   dstPitch;
+    int   width;
+    int   height;
+    float strengthNorm;
+    float threshold;
+    float radius;
+    int   quality;
+};
+
+RWByteAddressBuffer gDst : register(u0);
+ByteAddressBuffer  gSrc : register(t0);
+
+static const float3 kLumaWeights = float3(0.2126f, 0.7152f, 0.0722f);
+
+uint4 LoadPixel(uint x, uint y)
+{
+    const uint bytesPerPixel = 16;
+    uint index = (y * (uint)srcPitch + x) * bytesPerPixel;
+    return gSrc.Load4(index);
+}
+
+void StorePixel(uint x, uint y, float4 value)
+{
+    const uint bytesPerPixel = 16;
+    uint index = (y * (uint)dstPitch + x) * bytesPerPixel;
+    gDst.Store4(index, asuint(value));
+}
+
+float Gaussian1D(float dist, float sigma)
+{
+    return exp(-dist * dist / (2.0f * sigma * sigma));
+}
+
+[numthreads(16,16,1)]
+void main(uint3 dtid : SV_DispatchThreadID)
+{
+    uint x = dtid.x;
+    uint y = dtid.y;
+    if (x >= (uint)width || y >= (uint)height)
+        return;
+
+    uint4 baseRaw = LoadPixel(x, y);
+    float4 basePixel = asfloat(baseRaw);
+
+    float baseLuma = dot(basePixel.rgb, kLumaWeights);
+    float mask = saturate((baseLuma - threshold) * 4.0f);
+
+    if (mask <= 0.0f || strengthNorm <= 0.01f)
+    {
+        StorePixel(x, y, basePixel);
+        return;
+    }
+
+    const int SAMPLES_PER_DIR = 4;
+    float rad = max(radius, 1.0f);
+    float sigma = max(rad * 0.75f, 1.0f);
+
+    static const float2 dirs[8] = {
+        float2(1.0f, 0.0f),
+        float2(-1.0f, 0.0f),
+        float2(0.0f, 1.0f),
+        float2(0.0f, -1.0f),
+        float2(0.7071f, 0.7071f),
+        float2(-0.7071f, 0.7071f),
+        float2(0.7071f, -0.7071f),
+        float2(-0.7071f, -0.7071f)
+    };
+
+    float3 accum = basePixel.rgb;
+    float totalW = 1.0f;
+
+    [unroll]
+    for (int d = 0; d < 8; ++d)
+    {
+        float2 dir = dirs[d];
+
+        [unroll]
+        for (int s = 1; s <= SAMPLES_PER_DIR; ++s)
+        {
+            float dist = rad * (s / (float)SAMPLES_PER_DIR);
+            float w = Gaussian1D(dist, sigma);
+
+            int sx = (int)(x + dir.x * dist + 0.5f);
+            int sy = (int)(y + dir.y * dist + 0.5f);
+
+            sx = clamp(sx, 0, width - 1);
+            sy = clamp(sy, 0, height - 1);
+
+            float4 sample = asfloat(LoadPixel((uint)sx, (uint)sy));
+            float lum = dot(sample.rgb, kLumaWeights);
+
+            if (lum > threshold)
+            {
+                accum += sample.rgb * w;
+                totalW += w;
+            }
+        }
+    }
+
+    float3 glow = accum / totalW;
+    glow *= saturate(0.5f + strengthNorm * 1.5f);
+    glow = saturate(glow);
+
+    float3 screenColor = 1.0f - (1.0f - basePixel.rgb) * (1.0f - glow);
+    float3 finalColor = lerp(basePixel.rgb, screenColor, mask);
+
+    StorePixel(x, y, float4(finalColor, basePixel.a));
+})";
+
+    Microsoft::WRL::ComPtr<ID3DBlob> csBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> errBlob;
+
+    HRESULT hr = D3DCompile(
+        kLiteGlowHLSL,
+        strlen(kLiteGlowHLSL),
+        "LiteGlow_Kernel",
+        nullptr,
+        nullptr,
+        "main",
+        "cs_5_0",
+        D3DCOMPILE_OPTIMIZATION_LEVEL3,
+        0,
+        &csBlob,
+        &errBlob);
+
+    if (FAILED(hr) || !csBlob) {
+        return false;
+    }
+
+    // Root signature: b0 (CBV), u0 (UAV), t0 (SRV)
+    D3D12_DESCRIPTOR_RANGE ranges[3] = {};
+    ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+    ranges[0].NumDescriptors = 1;
+    ranges[0].BaseShaderRegister = 0;
+    ranges[0].OffsetInDescriptorsFromTableStart = 0;
+
+    ranges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    ranges[1].NumDescriptors = 1;
+    ranges[1].BaseShaderRegister = 0;
+    ranges[1].OffsetInDescriptorsFromTableStart = 1;
+
+    ranges[2].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    ranges[2].NumDescriptors = 1;
+    ranges[2].BaseShaderRegister = 0;
+    ranges[2].OffsetInDescriptorsFromTableStart = 2;
+
+    D3D12_ROOT_PARAMETER params[3] = {};
+    params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    params[0].DescriptorTable.NumDescriptorRanges = 1;
+    params[0].DescriptorTable.pDescriptorRanges = &ranges[0];
+    params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    params[1].DescriptorTable.NumDescriptorRanges = 1;
+    params[1].DescriptorTable.pDescriptorRanges = &ranges[1];
+    params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    params[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    params[2].DescriptorTable.NumDescriptorRanges = 1;
+    params[2].DescriptorTable.pDescriptorRanges = &ranges[2];
+    params[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
+    rootDesc.NumParameters = _countof(params);
+    rootDesc.pParameters = params;
+    rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+
+    Microsoft::WRL::ComPtr<ID3DBlob> sigBlob;
+    hr = D3D12SerializeRootSignature(&rootDesc, D3D_ROOT_SIGNATURE_VERSION_1, &sigBlob, &errBlob);
+    if (FAILED(hr) || !sigBlob) {
+        return false;
+    }
+
+    hr = ctx->mDevice->CreateRootSignature(
+        0,
+        sigBlob->GetBufferPointer(),
+        sigBlob->GetBufferSize(),
+        IID_PPV_ARGS(&shader->mRootSignature));
+    if (FAILED(hr)) {
+        return false;
+    }
+
+    D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature = shader->mRootSignature.Get();
+    psoDesc.CS.pShaderBytecode = csBlob->GetBufferPointer();
+    psoDesc.CS.BytecodeLength = csBlob->GetBufferSize();
+
+    hr = ctx->mDevice->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&shader->mPipelineState));
+    return SUCCEEDED(hr);
 }
 #endif // HAS_HLSL
 
@@ -359,6 +558,42 @@ static void ResampleWorld(PF_EffectWorld* src, PF_EffectWorld* dst, PF_Boolean i
 
         for (int x = 0; x < dst->width; ++x) {
             const float srcX = (x + 0.5f) / scaleX - 0.5f;
+            const int x0 = MAX(0, MIN(src->width - 1, (int)floor(srcX)));
+            const int x1 = MIN(src->width - 1, x0 + 1);
+            const float fx = clamp01(srcX - x0);
+
+            NormalizedPixel c00 = ReadNormalized(src, x0, y0, is_deep);
+            NormalizedPixel c10 = ReadNormalized(src, x1, y0, is_deep);
+            NormalizedPixel c01 = ReadNormalized(src, x0, y1, is_deep);
+            NormalizedPixel c11 = ReadNormalized(src, x1, y1, is_deep);
+
+            NormalizedPixel top = LerpPixel(c00, c10, fx);
+            NormalizedPixel bottom = LerpPixel(c01, c11, fx);
+            NormalizedPixel result = LerpPixel(top, bottom, fy);
+
+            WriteNormalized(dst, x, y, result, is_deep);
+        }
+    }
+}
+
+// Resample only a destination area with an explicit offset (used for ROI upsample).
+static void ResampleWorldArea(
+    PF_EffectWorld* src,
+    PF_EffectWorld* dst,
+    PF_Boolean is_deep,
+    const PF_LRect& dst_area)
+{
+    const float scaleX = (float)(dst_area.right - dst_area.left) / (float)src->width;
+    const float scaleY = (float)(dst_area.bottom - dst_area.top) / (float)src->height;
+
+    for (int y = dst_area.top; y < dst_area.bottom; ++y) {
+        const float srcY = ((float)(y - dst_area.top) + 0.5f) / scaleY - 0.5f;
+        const int y0 = MAX(0, MIN(src->height - 1, (int)floor(srcY)));
+        const int y1 = MIN(src->height - 1, y0 + 1);
+        const float fy = clamp01(srcY - y0);
+
+        for (int x = dst_area.left; x < dst_area.right; ++x) {
+            const float srcX = ((float)(x - dst_area.left) + 0.5f) / scaleX - 0.5f;
             const int x0 = MAX(0, MIN(src->width - 1, (int)floor(srcX)));
             const int x1 = MIN(src->width - 1, x0 + 1);
             const float fx = clamp01(srcX - x0);
@@ -900,7 +1135,8 @@ LiteGlowProcess(
     PF_OutData* out_data,
     PF_EffectWorld* inputW,
     PF_EffectWorld* outputW,
-    const LiteGlowRenderParams* rp)
+    const LiteGlowRenderParams* rp,
+    const PF_LRect* areaP)
 {
     if (!inputW || !outputW || !rp) {
         return PF_Err_INTERNAL_STRUCT_DAMAGED;
@@ -908,7 +1144,15 @@ LiteGlowProcess(
 
     PF_Err err = PF_Err_NONE;
     AEGP_SuiteHandler suites(in_data->pica_basicP);
-    A_long linesL = outputW->height;
+    // Working area (full frame by default; SmartFX ROI when provided)
+    PF_LRect work_area = { 0, 0, outputW->width, outputW->height };
+    if (areaP) {
+        work_area = *areaP;
+        work_area.left   = MAX(0, MIN(work_area.left, outputW->width));
+        work_area.top    = MAX(0, MIN(work_area.top, outputW->height));
+        work_area.right  = MAX(work_area.left, MIN(work_area.right, outputW->width));
+        work_area.bottom = MAX(work_area.top, MIN(work_area.bottom, outputW->height));
+    }
 
     const float strength = rp->strength;
 
@@ -928,6 +1172,11 @@ LiteGlowProcess(
     if (resolution_factor < 0.9f) {
         // Scale down the radius for previews to improve performance
         adjusted_radius = radius_param * MAX(0.5f, resolution_factor);
+    }
+
+    // For ROI mode, pre-fill output so untouched pixels stay correct.
+    if (areaP) {
+        ERR(PF_COPY(inputW, outputW, NULL, NULL));
     }
 
     // Create temporary buffers for processing
@@ -967,10 +1216,11 @@ LiteGlowProcess(
         downsample_scale = 0.5f;
     }
 
+    PF_LRect scaled_area = { 0, 0, 0, 0 };
     PF_Boolean use_scaled = (downsample_scale < 1.0f);
     if (use_scaled) {
-        int scaled_width = MAX(1, (int)(outputW->width * downsample_scale));
-        int scaled_height = MAX(1, (int)(outputW->height * downsample_scale));
+        int scaled_width = MAX(1, (int)((work_area.right - work_area.left) * downsample_scale));
+        int scaled_height = MAX(1, (int)((work_area.bottom - work_area.top) * downsample_scale));
 
         ERR(suites.WorldSuite1()->new_world(
             in_data->effect_ref,
@@ -997,7 +1247,15 @@ LiteGlowProcess(
             is_deep,
             &scaled_blur_v));
 
+        // Scaled area corresponding to ROI
+        PF_LRect scaled_area;
+        scaled_area.left   = 0;
+        scaled_area.top    = 0;
+        scaled_area.right  = scaled_width;
+        scaled_area.bottom = scaled_height;
+
         if (!err) {
+            // Downsample full ROI; cost is reduced because destination is smaller.
             ResampleWorld(inputW, &scaled_input, is_deep);
         }
     }
@@ -1011,7 +1269,8 @@ LiteGlowProcess(
         gdata.resolution_factor = resolution_factor * (use_scaled ? downsample_scale : 1.0f);
 
         PF_EffectWorld* bright_dest = use_scaled ? &scaled_bright : &bright_world;
-        A_long bright_lines = bright_dest->height;
+        PF_LRect bright_area = use_scaled ? scaled_area : work_area;
+        A_long bright_lines = bright_area.bottom - bright_area.top;
 
         if (is_deep) {
             ERR(suites.Iterate16Suite2()->iterate(
@@ -1019,7 +1278,7 @@ LiteGlowProcess(
                 0,
                 bright_lines,
                 gdata.input,
-                NULL,
+                use_scaled ? &bright_area : &bright_area,
                 (void*)&gdata,
                 ExtractBrightAreas16,
                 bright_dest));
@@ -1030,7 +1289,7 @@ LiteGlowProcess(
                 0,
                 bright_lines,
                 gdata.input,
-                NULL,
+                use_scaled ? &bright_area : &bright_area,
                 (void*)&gdata,
                 ExtractBrightAreas8,
                 bright_dest));
@@ -1093,9 +1352,9 @@ LiteGlowProcess(
             bdata.input = blur_source;
             bdata.radius = kernel_radius;
             bdata.kernel = kernel;
-
-            A_long blur_h_lines = blur_h_dest->height;
-            A_long blur_v_lines = blur_v_dest->height;
+            PF_LRect blur_area = use_scaled ? scaled_area : work_area;
+            A_long blur_h_lines = blur_area.bottom - blur_area.top;
+            A_long blur_v_lines = blur_area.bottom - blur_area.top;
 
             if (is_deep) {
                 ERR(suites.Iterate16Suite2()->iterate(
@@ -1103,7 +1362,7 @@ LiteGlowProcess(
                     0,
                     blur_h_lines,
                     blur_source,
-                    NULL,
+                    &blur_area,
                     (void*)&bdata,
                     GaussianBlurH16,
                     blur_h_dest));
@@ -1114,7 +1373,7 @@ LiteGlowProcess(
                     0,
                     blur_h_lines,
                     blur_source,
-                    NULL,
+                    &blur_area,
                     (void*)&bdata,
                     GaussianBlurH8,
                     blur_h_dest));
@@ -1130,7 +1389,7 @@ LiteGlowProcess(
                         0,
                         blur_v_lines,
                         blur_h_dest,
-                        NULL,
+                        &blur_area,
                         (void*)&bdata,
                         GaussianBlurV16,
                         blur_v_dest));
@@ -1141,7 +1400,7 @@ LiteGlowProcess(
                         0,
                         blur_v_lines,
                         blur_h_dest,
-                        NULL,
+                        &blur_area,
                         (void*)&bdata,
                         GaussianBlurV8,
                         blur_v_dest));
@@ -1151,7 +1410,8 @@ LiteGlowProcess(
                     PF_EffectWorld* extra_world = use_scaled ? &scaled_bright : &bright_world;
                     bdata.input = blur_v_dest;
 
-                    A_long extra_lines = extra_world->height;
+                    PF_LRect extra_area = use_scaled ? scaled_area : work_area;
+                    A_long extra_lines = extra_area.bottom - extra_area.top;
 
                     if (is_deep) {
                         ERR(suites.Iterate16Suite2()->iterate(
@@ -1159,7 +1419,7 @@ LiteGlowProcess(
                             0,
                             extra_lines,
                             blur_v_dest,
-                            NULL,
+                            &extra_area,
                             (void*)&bdata,
                             GaussianBlurH16,
                             extra_world));
@@ -1170,7 +1430,7 @@ LiteGlowProcess(
                             0,
                             extra_lines,
                             blur_v_dest,
-                            NULL,
+                            &extra_area,
                             (void*)&bdata,
                             GaussianBlurH8,
                             extra_world));
@@ -1185,7 +1445,7 @@ LiteGlowProcess(
                                 0,
                                 blur_v_lines,
                                 extra_world,
-                                NULL,
+                                &extra_area,
                                 (void*)&bdata,
                                 GaussianBlurV16,
                                 blur_v_dest));
@@ -1196,7 +1456,7 @@ LiteGlowProcess(
                                 0,
                                 blur_v_lines,
                                 extra_world,
-                                NULL,
+                                &extra_area,
                                 (void*)&bdata,
                                 GaussianBlurV8,
                                 blur_v_dest));
@@ -1205,7 +1465,7 @@ LiteGlowProcess(
                 }
 
                 if (use_scaled) {
-                    ResampleWorld(&scaled_blur_v, &blur_v_world, is_deep);
+                    ResampleWorldArea(&scaled_blur_v, &blur_v_world, is_deep, work_area);
                 }
 
                 // STEP 4: Blend original and glow
@@ -1218,9 +1478,9 @@ LiteGlowProcess(
                     ERR(suites.Iterate16Suite2()->iterate(
                         in_data,
                         0,               // progress base
-                        linesL,          // progress final
+                        work_area.bottom,          // progress final
                         inputW,          // src (original)
-                        NULL,            // area - null for all pixels
+                        areaP ? &work_area : NULL,            // area - ROI when provided
                         (void*)&blend_data, // refcon - blend parameters
                         BlendGlow16,     // pixel function
                         outputW));       // destination
@@ -1229,9 +1489,9 @@ LiteGlowProcess(
                     ERR(suites.Iterate8Suite2()->iterate(
                         in_data,
                         0,               // progress base
-                        linesL,          // progress final
+                        work_area.bottom,          // progress final
                         inputW,          // src (original)
-                        NULL,            // area - null for all pixels
+                        areaP ? &work_area : NULL,            // area - ROI when provided
                         (void*)&blend_data, // refcon - blend parameters
                         BlendGlow8,      // pixel function
                         outputW));       // destination
@@ -1300,13 +1560,24 @@ GPUDeviceSetup(
         DX_ERR(dx_gpu_data->context->Initialize(
             (ID3D12Device*)device_info.devicePV,
             (ID3D12CommandQueue*)device_info.command_queuePV));
+        bool loaded = false;
 
         std::wstring csoPath, sigPath;
-        DX_ERR(GetShaderPath(L"LiteGlowKernel", csoPath, sigPath));
-        DX_ERR(dx_gpu_data->context->LoadShader(
-            csoPath.c_str(),
-            sigPath.c_str(),
-            dx_gpu_data->glowShader));
+        if (GetShaderPath(L"LiteGlowKernel", csoPath, sigPath))
+        {
+            loaded = dx_gpu_data->context->LoadShader(
+                csoPath.c_str(),
+                sigPath.c_str(),
+                dx_gpu_data->glowShader);
+        }
+
+        // Fallback: compile embedded HLSL so GPU path never silently drops to CPU.
+        if (!loaded)
+        {
+            loaded = CompileEmbeddedLiteGlowShader(dx_gpu_data->context, dx_gpu_data->glowShader);
+        }
+
+        DX_ERR(loaded);
 
         extraP->output->gpu_data = gpu_dataH;
         out_data->out_flags2 |= PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
@@ -1371,9 +1642,10 @@ SmartRenderCPU(
     PF_EffectWorld* input_worldP,
     PF_EffectWorld* output_worldP,
     PF_SmartRenderExtra* /*extraP*/,
-    LiteGlowRenderParams* params)
+    LiteGlowRenderParams* params,
+    const PF_LRect* areaP)
 {
-    return LiteGlowProcess(in_data, out_data, input_worldP, output_worldP, params);
+    return LiteGlowProcess(in_data, out_data, input_worldP, output_worldP, params, areaP);
 }
 
 #if HAS_HLSL
@@ -1386,7 +1658,8 @@ SmartRenderGPU(
     PF_EffectWorld* input_worldP,
     PF_EffectWorld* output_worldP,
     PF_SmartRenderExtra* extraP,
-    LiteGlowRenderParams* params)
+    LiteGlowRenderParams* params,
+    const PF_LRect* areaP)
 {
     PF_Err err = PF_Err_NONE;
 
@@ -1398,7 +1671,7 @@ SmartRenderGPU(
 
     if (pixel_format != PF_PixelFormat_GPU_BGRA128) {
         // Fall back to CPU if GPU format is not what we expect.
-        return LiteGlowProcess(in_data, out_data, input_worldP, output_worldP, params);
+        return LiteGlowProcess(in_data, out_data, input_worldP, output_worldP, params, areaP);
     }
 
     PF_GPUDeviceInfo device_info;
@@ -1454,7 +1727,7 @@ SmartRenderGPU(
     }
     else {
         // Unsupported GPU framework – fall back to CPU implementation.
-        err = LiteGlowProcess(in_data, out_data, input_worldP, output_worldP, params);
+        err = LiteGlowProcess(in_data, out_data, input_worldP, output_worldP, params, areaP);
     }
 
     return err;
@@ -1469,9 +1742,10 @@ SmartRenderGPU(
     PF_EffectWorld* input_worldP,
     PF_EffectWorld* output_worldP,
     PF_SmartRenderExtra* /*extraP*/,
-    LiteGlowRenderParams* params)
+    LiteGlowRenderParams* params,
+    const PF_LRect* areaP)
 {
-    return LiteGlowProcess(in_data, out_data, input_worldP, output_worldP, params);
+    return LiteGlowProcess(in_data, out_data, input_worldP, output_worldP, params, areaP);
 }
 #endif
 
@@ -1596,6 +1870,7 @@ SmartRender(
 
     LiteGlowRenderParams* infoP =
         reinterpret_cast<LiteGlowRenderParams*>(extraP->input->pre_render_data);
+    const PF_LRect* areaP = &extraP->output->result_rect;
 
     if (!infoP) {
         return PF_Err_INTERNAL_STRUCT_DAMAGED;
@@ -1618,10 +1893,10 @@ SmartRender(
 
         if (!err) {
             if (isGPU) {
-                ERR(SmartRenderGPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, infoP));
+                ERR(SmartRenderGPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, infoP, areaP));
             }
             else {
-                ERR(SmartRenderCPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, infoP));
+                ERR(SmartRenderCPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, infoP, areaP));
             }
         }
     }
@@ -1653,7 +1928,7 @@ Render(
     PF_EffectWorld* inputW = reinterpret_cast<PF_EffectWorld*>(&params[LITEGLOW_INPUT]->u.ld);
     PF_EffectWorld* outputW = reinterpret_cast<PF_EffectWorld*>(output);
 
-    return LiteGlowProcess(in_data, out_data, inputW, outputW, &rp);
+    return LiteGlowProcess(in_data, out_data, inputW, outputW, &rp, NULL);
 }
 
 extern "C" DllExport
