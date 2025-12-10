@@ -45,9 +45,9 @@ resource 'PiPL' (16000) {
             0x06000400
         },
         AE_Effect_Global_OutFlags_2 {
-            // 0x2A001400 was the previous value. The extra 0x00030000 adds
-            // PF_OutFlag2_SUPPORTS_GPU_RENDER_F32 and PF_OutFlag2_SUPPORTS_DIRECTX_RENDERING.
-            0x2A301400
+            // 0x0A001400 base + 0x00030000 for GPU bits; I_MIX_GUID_DEPENDENCIES is intentionally
+            // NOT set to avoid GuidMixInPtr requirement during SMART_PRE_RENDER.
+            0x0A301400
         },
         AE_Effect_Match_Name {
             "361do LiteGlow"

@@ -4,24 +4,6 @@
 #include "PrSDKAESupport.h"
 #include "Smart_Utils.h"
 
-// Optional GuidMixInPtr support (newer AE builds want this even if the SDK header predates it).
-typedef PF_Err(*PF_GuidMixInPtr)(PF_ProgPtr effect_ref, const void* dataP, A_long data_size);
-
-static inline PF_GuidMixInPtr GetGuidMixInPtr(const PF_PreRenderCallbacks* cb)
-{
-    if (!cb) return nullptr;
-
-    // PF_PreRenderCallbacks historically was a single function pointer (checkout_layer).
-    // Newer SDKs add GuidMixInPtr as the second slot; older headers omit it but the slot
-    // still exists at runtime in newer hosts. Use pointer math to fetch the second entry safely.
-    auto func_slots = reinterpret_cast<void* const*>(cb);
-
-    // slot 0: checkout_layer (always present)
-    // slot 1: GuidMixInPtr (only on newer hosts)
-    PF_GuidMixInPtr maybe_ptr = reinterpret_cast<PF_GuidMixInPtr>(func_slots[1]);
-    return maybe_ptr;
-}
-
 #ifdef AE_OS_WIN
     #include "DirectXUtils.h"
 #endif
@@ -119,9 +101,9 @@ GlobalSetup(
         PF_OutFlag_PIX_INDEPENDENT |
         PF_OutFlag_SEND_UPDATE_PARAMS_UI;
 
-    // Smart Render + threaded rendering + 32-bit float aware.
-    // Initialize with the exact PiPL bits (0x2A301400) so host/code always match.
-    out_data->out_flags2 = 0x2A301400;
+    // Smart Render + threaded rendering + 32-bit float aware + GPU bits.
+    // PF_OutFlag2_I_MIX_GUID_DEPENDENCIES is NOT set to avoid GuidMixInPtr requirement.
+    out_data->out_flags2 = 0x0A301400;
 
     // Premiere uses pixel format suite; AE will ignore this block.
     if (in_data->appl_id == 'PrMr') {
@@ -1558,10 +1540,7 @@ PreRender(
     infoP->quality = cur_param.u.pd.value;
 
     // Inform the host what this frame depends on for cache/GUID correctness.
-    // Call GuidMixInPtr if the host provides it (required by AE 25.4+ when present).
-    if (PF_GuidMixInPtr mixin = GetGuidMixInPtr(extraP->cb)) {
-        ERR(mixin(in_data->effect_ref, infoP, sizeof(LiteGlowRenderParams)));
-    }
+    // GuidMixInPtr is not required because we do not advertise I_MIX_GUID_DEPENDENCIES.
 
     // Downsample info
     float downscale_x = static_cast<float>(in_data->downsample_x.den) / static_cast<float>(in_data->downsample_x.num);
