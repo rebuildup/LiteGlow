@@ -4,7 +4,23 @@
 #include "PrSDKAESupport.h"
 #include "Smart_Utils.h"
 
-#include <type_traits>
+// Optional GuidMixInPtr support (newer AE builds want this even if the SDK header predates it).
+typedef PF_Err(*PF_GuidMixInPtr)(PF_ProgPtr effect_ref, const void* dataP, A_long data_size);
+
+static inline PF_GuidMixInPtr GetGuidMixInPtr(const PF_PreRenderCallbacks* cb)
+{
+    if (!cb) return nullptr;
+
+    // PF_PreRenderCallbacks historically was a single function pointer (checkout_layer).
+    // Newer SDKs add GuidMixInPtr as the second slot; older headers omit it but the slot
+    // still exists at runtime in newer hosts. Use pointer math to fetch the second entry safely.
+    auto func_slots = reinterpret_cast<void* const*>(cb);
+
+    // slot 0: checkout_layer (always present)
+    // slot 1: GuidMixInPtr (only on newer hosts)
+    PF_GuidMixInPtr maybe_ptr = reinterpret_cast<PF_GuidMixInPtr>(func_slots[1]);
+    return maybe_ptr;
+}
 
 #ifdef AE_OS_WIN
     #include "DirectXUtils.h"
@@ -104,15 +120,8 @@ GlobalSetup(
         PF_OutFlag_SEND_UPDATE_PARAMS_UI;
 
     // Smart Render + threaded rendering + 32-bit float aware.
-    out_data->out_flags2 = PF_OutFlag2_FLOAT_COLOR_AWARE |
-        PF_OutFlag2_SUPPORTS_SMART_RENDER |
-        PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
-
-    // GPU support: set the same flags the PiPL advertises so host and code agree.
-#if HAS_HLSL
-    out_data->out_flags2 |= PF_OutFlag2_SUPPORTS_GPU_RENDER_F32 |
-        PF_OutFlag2_SUPPORTS_DIRECTX_RENDERING;
-#endif
+    // Initialize with the exact PiPL bits (0x2A301400) so host/code always match.
+    out_data->out_flags2 = 0x2A301400;
 
     // Premiere uses pixel format suite; AE will ignore this block.
     if (in_data->appl_id == 'PrMr') {
@@ -1549,27 +1558,10 @@ PreRender(
     infoP->quality = cur_param.u.pd.value;
 
     // Inform the host what this frame depends on for cache/GUID correctness.
-    // Call GuidMixInPtr only if the SDK/host provides it.
-#if defined(_MSC_VER)
-    __if_exists(PF_PreRenderCallbacks::guidMixInPtr) {
-        if (extraP->cb->guidMixInPtr) {
-            ERR(extraP->cb->guidMixInPtr(
-                in_data->effect_ref,
-                infoP,
-                sizeof(LiteGlowRenderParams)));
-        }
+    // Call GuidMixInPtr if the host provides it (required by AE 25.4+ when present).
+    if (PF_GuidMixInPtr mixin = GetGuidMixInPtr(extraP->cb)) {
+        ERR(mixin(in_data->effect_ref, infoP, sizeof(LiteGlowRenderParams)));
     }
-#elif defined(__clang__) || defined(__GNUC__)
-    // requires-expression avoids hard error when member is absent.
-    if constexpr (requires(PF_PreRenderCallbacks* cb) { cb->guidMixInPtr; }) {
-        if (extraP->cb->guidMixInPtr) {
-            ERR(extraP->cb->guidMixInPtr(
-                in_data->effect_ref,
-                infoP,
-                sizeof(LiteGlowRenderParams)));
-        }
-    }
-#endif
 
     // Downsample info
     float downscale_x = static_cast<float>(in_data->downsample_x.den) / static_cast<float>(in_data->downsample_x.num);
