@@ -1,5 +1,6 @@
 #include "LiteGlow.h"
 #include "AEGP_SuiteHandler.h"
+#include "AE_EffectPixelFormat.h"
 #include <math.h>
 
 // Simple, reliable CPU-only glow rebuilt from Skeleton template.
@@ -86,6 +87,9 @@ inline float Luma8(const PF_Pixel8* p) {
 inline float Luma16(const PF_Pixel16* p) {
     return (0.2126f * p->red + 0.7152f * p->green + 0.0722f * p->blue) / 32768.0f;
 }
+inline float LumaF(const PF_PixelFloat* p) {
+    return (0.2126f * p->red + 0.7152f * p->green + 0.0722f * p->blue);
+}
 
 // -------- Bright pass --------
 typedef struct {
@@ -104,6 +108,22 @@ static PF_Err BrightPass8(void* refcon, A_long x, A_long y, PF_Pixel8* inP, PF_P
         outP->blue  = (A_u_char)MIN(255.0f, inP->blue  * s);
     } else {
         outP->red = outP->green = outP->blue = 0;
+    }
+    outP->alpha = inP->alpha;
+    return PF_Err_NONE;
+}
+
+static PF_Err BrightPassF(void* refcon, A_long x, A_long y, PF_PixelFloat* inP, PF_PixelFloat* outP)
+{
+    BrightPassInfo* bp = reinterpret_cast<BrightPassInfo*>(refcon);
+    float l = LumaF(inP);
+    if (l > bp->threshold) {
+        float s = bp->strength;
+        outP->red   = MIN(1.0f, inP->red   * s);
+        outP->green = MIN(1.0f, inP->green * s);
+        outP->blue  = MIN(1.0f, inP->blue  * s);
+    } else {
+        outP->red = outP->green = outP->blue = 0.0f;
     }
     outP->alpha = inP->alpha;
     return PF_Err_NONE;
@@ -130,6 +150,46 @@ typedef struct {
     PF_EffectWorld* src;
     int radius;
 } BlurInfo;
+
+static PF_Err BlurHF(void* refcon, A_long x, A_long y, PF_PixelFloat* inP, PF_PixelFloat* outP)
+{
+    BlurInfo* bi = reinterpret_cast<BlurInfo*>(refcon);
+    PF_EffectWorld* w = bi->src;
+    int r = bi->radius;
+    float rsum = 0, gsum = 0, bsum = 0;
+    int count = 0;
+    for (int i = -r; i <= r; ++i) {
+        int sx = MAX(0, MIN(w->width - 1, x + i));
+        PF_PixelFloat* p = (PF_PixelFloat*)((char*)w->data + y * w->rowbytes) + sx;
+        rsum += p->red; gsum += p->green; bsum += p->blue;
+        ++count;
+    }
+    outP->red = rsum / count;
+    outP->green = gsum / count;
+    outP->blue = bsum / count;
+    outP->alpha = inP->alpha;
+    return PF_Err_NONE;
+}
+
+static PF_Err BlurVF(void* refcon, A_long x, A_long y, PF_PixelFloat* inP, PF_PixelFloat* outP)
+{
+    BlurInfo* bi = reinterpret_cast<BlurInfo*>(refcon);
+    PF_EffectWorld* w = bi->src;
+    int r = bi->radius;
+    float rsum = 0, gsum = 0, bsum = 0;
+    int count = 0;
+    for (int j = -r; j <= r; ++j) {
+        int sy = MAX(0, MIN(w->height - 1, y + j));
+        PF_PixelFloat* p = (PF_PixelFloat*)((char*)w->data + sy * w->rowbytes) + x;
+        rsum += p->red; gsum += p->green; bsum += p->blue;
+        ++count;
+    }
+    outP->red = rsum / count;
+    outP->green = gsum / count;
+    outP->blue = bsum / count;
+    outP->alpha = inP->alpha;
+    return PF_Err_NONE;
+}
 
 static PF_Err BlurH8(void* refcon, A_long x, A_long y, PF_Pixel8* inP, PF_Pixel8* outP)
 {
@@ -217,6 +277,28 @@ typedef struct {
     float strength; // 0..1
 } BlendInfo;
 
+static PF_Err BlendScreenF(void* refcon, A_long x, A_long y, PF_PixelFloat* inP, PF_PixelFloat* outP)
+{
+    BlendInfo* bi = reinterpret_cast<BlendInfo*>(refcon);
+    PF_PixelFloat* g = (PF_PixelFloat*)((char*)bi->glow->data + y * bi->glow->rowbytes) + x;
+
+    float s = bi->strength;
+    float gr = g->red   * s;
+    float gg = g->green * s;
+    float gb = g->blue  * s;
+
+    auto screen = [](float a, float b) { return 1.0f - (1.0f - a) * (1.0f - b); };
+    float r = screen(inP->red, gr);
+    float gch = screen(inP->green, gg);
+    float b = screen(inP->blue, gb);
+
+    outP->red = r;
+    outP->green = gch;
+    outP->blue = b;
+    outP->alpha = inP->alpha;
+    return PF_Err_NONE;
+}
+
 static PF_Err BlendScreen8(void* refcon, A_long x, A_long y, PF_Pixel8* inP, PF_Pixel8* outP)
 {
     BlendInfo* bi = reinterpret_cast<BlendInfo*>(refcon);
@@ -287,25 +369,35 @@ Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_Layer
     }
 
     PF_EffectWorld* inputW = &params[LITEGLOW_INPUT]->u.ld;
-    PF_Boolean is_deep = PF_WORLD_IS_DEEP(inputW);
+
+    AEFX_SuiteScoper<PF_WorldSuite2> worldSuite(in_data, kPFWorldSuite, kPFWorldSuiteVersion2, out_data);
+    PF_PixelFormat pixfmt = PF_PixelFormat_INVALID;
+    ERR(worldSuite->PF_GetPixelFormat(inputW, &pixfmt));
+    if (pixfmt == PF_PixelFormat_INVALID) {
+        return PF_Err_BAD_CALLBACK_PARAM;
+    }
 
     // Allocate temporary worlds
     PF_EffectWorld brightW, blurH, blurV;
-    ERR(suites.WorldSuite1()->new_world(in_data->effect_ref, output->width, output->height, is_deep, &brightW));
-    ERR(suites.WorldSuite1()->new_world(in_data->effect_ref, output->width, output->height, is_deep, &blurH));
-    ERR(suites.WorldSuite1()->new_world(in_data->effect_ref, output->width, output->height, is_deep, &blurV));
+    ERR(worldSuite->PF_NewWorld(in_data->effect_ref, output->width, output->height, TRUE, pixfmt, &brightW));
+    ERR(worldSuite->PF_NewWorld(in_data->effect_ref, output->width, output->height, TRUE, pixfmt, &blurH));
+    ERR(worldSuite->PF_NewWorld(in_data->effect_ref, output->width, output->height, TRUE, pixfmt, &blurV));
 
     if (!err) {
         // 1) Bright pass
         BrightPassInfo bp{ threshold_norm, 1.5f }; // extra gain to ensure visibility
         A_long lines = output->height;
-        if (is_deep) {
+        if (pixfmt == PF_PixelFormat_ARGB32) {
+            ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines,
+                inputW, NULL, &bp, BrightPass8, &brightW));
+        }
+        else if (pixfmt == PF_PixelFormat_ARGB64) {
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines,
                 inputW, NULL, &bp, BrightPass16, &brightW));
         }
-        else {
-            ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines,
-                inputW, NULL, &bp, BrightPass8, &brightW));
+        else { // PF_PixelFormat_ARGB128
+            ERR(suites.IterateFloatSuite2()->iterate(in_data, 0, lines,
+                inputW, NULL, &bp, BrightPassF, &brightW));
         }
     }
 
@@ -313,11 +405,14 @@ Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_Layer
         // 2) Blur horizontal
         BlurInfo bi{ &brightW, radius };
         A_long lines = output->height;
-        if (is_deep) {
+        if (pixfmt == PF_PixelFormat_ARGB32) {
+            ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines, &brightW, NULL, &bi, BlurH8, &blurH));
+        }
+        else if (pixfmt == PF_PixelFormat_ARGB64) {
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines, &brightW, NULL, &bi, BlurH16, &blurH));
         }
         else {
-            ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines, &brightW, NULL, &bi, BlurH8, &blurH));
+            ERR(suites.IterateFloatSuite2()->iterate(in_data, 0, lines, &brightW, NULL, &bi, BlurHF, &blurH));
         }
     }
 
@@ -325,11 +420,14 @@ Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_Layer
         // 3) Blur vertical
         BlurInfo bi{ &blurH, radius };
         A_long lines = output->height;
-        if (is_deep) {
+        if (pixfmt == PF_PixelFormat_ARGB32) {
+            ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines, &blurH, NULL, &bi, BlurV8, &blurV));
+        }
+        else if (pixfmt == PF_PixelFormat_ARGB64) {
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines, &blurH, NULL, &bi, BlurV16, &blurV));
         }
         else {
-            ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines, &blurH, NULL, &bi, BlurV8, &blurV));
+            ERR(suites.IterateFloatSuite2()->iterate(in_data, 0, lines, &blurH, NULL, &bi, BlurVF, &blurV));
         }
     }
 
@@ -337,20 +435,24 @@ Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_Layer
         // 4) Screen blend
         BlendInfo bl{ &blurV, MAX(0.1f, strength_norm * 2.0f) };
         A_long lines = output->height;
-        if (is_deep) {
+        if (pixfmt == PF_PixelFormat_ARGB32) {
+            ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines,
+                inputW, NULL, &bl, BlendScreen8, output));
+        }
+        else if (pixfmt == PF_PixelFormat_ARGB64) {
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines,
                 inputW, NULL, &bl, BlendScreen16, output));
         }
         else {
-            ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines,
-                inputW, NULL, &bl, BlendScreen8, output));
+            ERR(suites.IterateFloatSuite2()->iterate(in_data, 0, lines,
+                inputW, NULL, &bl, BlendScreenF, output));
         }
     }
 
     // Dispose temps
-    suites.WorldSuite1()->dispose_world(in_data->effect_ref, &brightW);
-    suites.WorldSuite1()->dispose_world(in_data->effect_ref, &blurH);
-    suites.WorldSuite1()->dispose_world(in_data->effect_ref, &blurV);
+    worldSuite->PF_DisposeWorld(in_data->effect_ref, &brightW);
+    worldSuite->PF_DisposeWorld(in_data->effect_ref, &blurH);
+    worldSuite->PF_DisposeWorld(in_data->effect_ref, &blurV);
 
     return err;
 }
