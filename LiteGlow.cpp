@@ -31,8 +31,9 @@ GlobalSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
         PF_OutFlag_PIX_INDEPENDENT |
         PF_OutFlag_DEEP_COLOR_AWARE;
 
-    // Smart Render のみ宣言 (GPU未実装、スレッドはPiPLと合わせて未宣言)
-    out_data->out_flags2 = PF_OutFlag2_SUPPORTS_SMART_RENDER;
+    // スマートレンダー + マルチフレームレンダリング対応（スレッドセーフ）
+    out_data->out_flags2 = PF_OutFlag2_SUPPORTS_SMART_RENDER |
+        PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
 
     return PF_Err_NONE;
 }
@@ -97,53 +98,74 @@ inline float LumaF(const PF_PixelFloat* p) {
 typedef struct {
     float threshold;   // 0..1
     float strength;    // 0..1 normalized
+    PF_EffectWorld* src; // optional, for downsampled path
+    int factor;        // 1 means same size
 } BrightPassInfo;
 
 static PF_Err BrightPass8(void* refcon, A_long x, A_long y, PF_Pixel8* inP, PF_Pixel8* outP)
 {
     BrightPassInfo* bp = reinterpret_cast<BrightPassInfo*>(refcon);
-    float l = Luma8(inP);
+    // sample source (possibly larger) using factor
+    PF_Pixel8* srcP = inP;
+    if (bp->factor > 1 && bp->src) {
+        int sx = MIN(bp->src->width - 1, (int)(x * bp->factor));
+        int sy = MIN(bp->src->height - 1, (int)(y * bp->factor));
+        srcP = (PF_Pixel8*)((char*)bp->src->data + sy * bp->src->rowbytes) + sx;
+    }
+    float l = Luma8(srcP);
     if (l > bp->threshold) {
         float s = bp->strength;
-        outP->red   = (A_u_char)MIN(255.0f, inP->red   * s);
-        outP->green = (A_u_char)MIN(255.0f, inP->green * s);
-        outP->blue  = (A_u_char)MIN(255.0f, inP->blue  * s);
+        outP->red   = (A_u_char)MIN(255.0f, srcP->red   * s);
+        outP->green = (A_u_char)MIN(255.0f, srcP->green * s);
+        outP->blue  = (A_u_char)MIN(255.0f, srcP->blue  * s);
     } else {
         outP->red = outP->green = outP->blue = 0;
     }
-    outP->alpha = inP->alpha;
+    outP->alpha = srcP->alpha;
     return PF_Err_NONE;
 }
 
 static PF_Err BrightPassF(void* refcon, A_long x, A_long y, PF_PixelFloat* inP, PF_PixelFloat* outP)
 {
     BrightPassInfo* bp = reinterpret_cast<BrightPassInfo*>(refcon);
-    float l = LumaF(inP);
+    PF_PixelFloat* srcP = inP;
+    if (bp->factor > 1 && bp->src) {
+        int sx = MIN(bp->src->width - 1, (int)(x * bp->factor));
+        int sy = MIN(bp->src->height - 1, (int)(y * bp->factor));
+        srcP = (PF_PixelFloat*)((char*)bp->src->data + sy * bp->src->rowbytes) + sx;
+    }
+    float l = LumaF(srcP);
     if (l > bp->threshold) {
         float s = bp->strength;
-        outP->red   = MIN(1.0f, inP->red   * s);
-        outP->green = MIN(1.0f, inP->green * s);
-        outP->blue  = MIN(1.0f, inP->blue  * s);
+        outP->red   = MIN(1.0f, srcP->red   * s);
+        outP->green = MIN(1.0f, srcP->green * s);
+        outP->blue  = MIN(1.0f, srcP->blue  * s);
     } else {
         outP->red = outP->green = outP->blue = 0.0f;
     }
-    outP->alpha = inP->alpha;
+    outP->alpha = srcP->alpha;
     return PF_Err_NONE;
 }
 
 static PF_Err BrightPass16(void* refcon, A_long x, A_long y, PF_Pixel16* inP, PF_Pixel16* outP)
 {
     BrightPassInfo* bp = reinterpret_cast<BrightPassInfo*>(refcon);
-    float l = Luma16(inP);
+    PF_Pixel16* srcP = inP;
+    if (bp->factor > 1 && bp->src) {
+        int sx = MIN(bp->src->width - 1, (int)(x * bp->factor));
+        int sy = MIN(bp->src->height - 1, (int)(y * bp->factor));
+        srcP = (PF_Pixel16*)((char*)bp->src->data + sy * bp->src->rowbytes) + sx;
+    }
+    float l = Luma16(srcP);
     if (l > bp->threshold) {
         float s = bp->strength;
-        outP->red   = (A_u_short)MIN(32768.0f, inP->red   * s);
-        outP->green = (A_u_short)MIN(32768.0f, inP->green * s);
-        outP->blue  = (A_u_short)MIN(32768.0f, inP->blue  * s);
+        outP->red   = (A_u_short)MIN(32768.0f, srcP->red   * s);
+        outP->green = (A_u_short)MIN(32768.0f, srcP->green * s);
+        outP->blue  = (A_u_short)MIN(32768.0f, srcP->blue  * s);
     } else {
         outP->red = outP->green = outP->blue = 0;
     }
-    outP->alpha = inP->alpha;
+    outP->alpha = srcP->alpha;
     return PF_Err_NONE;
 }
 
@@ -277,12 +299,15 @@ static PF_Err BlurV16(void* refcon, A_long x, A_long y, PF_Pixel16* inP, PF_Pixe
 typedef struct {
     PF_EffectWorld* glow;
     float strength; // 0..1
+    int factor;     // downsample factor for glow buffer (1,2,4)
 } BlendInfo;
 
 static PF_Err BlendScreenF(void* refcon, A_long x, A_long y, PF_PixelFloat* inP, PF_PixelFloat* outP)
 {
     BlendInfo* bi = reinterpret_cast<BlendInfo*>(refcon);
-    PF_PixelFloat* g = (PF_PixelFloat*)((char*)bi->glow->data + y * bi->glow->rowbytes) + x;
+    int gx = MIN(bi->glow->width - 1, (int)(x / bi->factor));
+    int gy = MIN(bi->glow->height - 1, (int)(y / bi->factor));
+    PF_PixelFloat* g = (PF_PixelFloat*)((char*)bi->glow->data + gy * bi->glow->rowbytes) + gx;
 
     float s = bi->strength;
     float gr = g->red   * s;
@@ -304,7 +329,9 @@ static PF_Err BlendScreenF(void* refcon, A_long x, A_long y, PF_PixelFloat* inP,
 static PF_Err BlendScreen8(void* refcon, A_long x, A_long y, PF_Pixel8* inP, PF_Pixel8* outP)
 {
     BlendInfo* bi = reinterpret_cast<BlendInfo*>(refcon);
-    PF_Pixel8* g = (PF_Pixel8*)((char*)bi->glow->data + y * bi->glow->rowbytes) + x;
+    int gx = MIN(bi->glow->width - 1, (int)(x / bi->factor));
+    int gy = MIN(bi->glow->height - 1, (int)(y / bi->factor));
+    PF_Pixel8* g = (PF_Pixel8*)((char*)bi->glow->data + gy * bi->glow->rowbytes) + gx;
 
     float s = bi->strength;
     float gr = (g->red   / 255.0f) * s;
@@ -326,7 +353,9 @@ static PF_Err BlendScreen8(void* refcon, A_long x, A_long y, PF_Pixel8* inP, PF_
 static PF_Err BlendScreen16(void* refcon, A_long x, A_long y, PF_Pixel16* inP, PF_Pixel16* outP)
 {
     BlendInfo* bi = reinterpret_cast<BlendInfo*>(refcon);
-    PF_Pixel16* g = (PF_Pixel16*)((char*)bi->glow->data + y * bi->glow->rowbytes) + x;
+    int gx = MIN(bi->glow->width - 1, (int)(x / bi->factor));
+    int gy = MIN(bi->glow->height - 1, (int)(y / bi->factor));
+    PF_Pixel16* g = (PF_Pixel16*)((char*)bi->glow->data + gy * bi->glow->rowbytes) + gx;
 
     float s = bi->strength;
     float gr = (g->red   / 32768.0f) * s;
@@ -397,30 +426,37 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, const LiteGlowSettings& 
     }
 
     // Allocate temporary worlds
+    // Downsample factor to reduce work: High=1, Medium=2, Low=4
+    int ds = (quality == QUALITY_HIGH) ? 1 : (quality == QUALITY_MEDIUM ? 2 : 4);
+    int dsW = MAX(1, outputW->width / ds);
+    int dsH = MAX(1, outputW->height / ds);
+
     PF_EffectWorld brightW, blurH, blurV;
-    ERR(worldSuite->PF_NewWorld(in_data->effect_ref, outputW->width, outputW->height, TRUE, pixfmt, &brightW));
-    ERR(worldSuite->PF_NewWorld(in_data->effect_ref, outputW->width, outputW->height, TRUE, pixfmt, &blurH));
-    ERR(worldSuite->PF_NewWorld(in_data->effect_ref, outputW->width, outputW->height, TRUE, pixfmt, &blurV));
+    ERR(worldSuite->PF_NewWorld(in_data->effect_ref, dsW, dsH, TRUE, pixfmt, &brightW));
+    ERR(worldSuite->PF_NewWorld(in_data->effect_ref, dsW, dsH, TRUE, pixfmt, &blurH));
+    ERR(worldSuite->PF_NewWorld(in_data->effect_ref, dsW, dsH, TRUE, pixfmt, &blurV));
+
+    int ds_radius = MAX(1, radius / ds);
 
     if (!err) {
         // 1) Bright pass
-        BrightPassInfo bp{ threshold_norm, 1.5f }; // extra gain to ensure visibility
-        A_long lines = outputW->height;
+        BrightPassInfo bp{ threshold_norm, 1.5f, inputW, ds };
+        A_long lines = brightW.height;
         if (pixfmt == PF_PixelFormat_ARGB32) {
             ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines,
-                inputW, NULL, &bp, BrightPass8, &brightW));
+                &brightW, NULL, &bp, BrightPass8, &brightW));
         }
         else if (pixfmt == PF_PixelFormat_ARGB64) {
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines,
-                inputW, NULL, &bp, BrightPass16, &brightW));
+                &brightW, NULL, &bp, BrightPass16, &brightW));
         }
         else { /* no-op */ }
     }
 
     if (!err) {
         // 2) Blur horizontal
-        BlurInfo bi{ &brightW, radius };
-        A_long lines = outputW->height;
+        BlurInfo bi{ &brightW, ds_radius };
+        A_long lines = brightW.height;
         if (pixfmt == PF_PixelFormat_ARGB32) {
             ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines, &brightW, NULL, &bi, BlurH8, &blurH));
         }
@@ -432,8 +468,8 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, const LiteGlowSettings& 
 
     if (!err) {
         // 3) Blur vertical
-        BlurInfo bi{ &blurH, radius };
-        A_long lines = outputW->height;
+        BlurInfo bi{ &blurH, ds_radius };
+        A_long lines = blurH.height;
         if (pixfmt == PF_PixelFormat_ARGB32) {
             ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines, &blurH, NULL, &bi, BlurV8, &blurV));
         }
@@ -445,7 +481,7 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, const LiteGlowSettings& 
 
     if (!err) {
         // 4) Screen blend
-        BlendInfo bl{ &blurV, MAX(0.1f, strength_norm * 2.0f) };
+        BlendInfo bl{ &blurV, MAX(0.1f, strength_norm * 2.0f), ds };
         A_long lines = outputW->height;
         if (pixfmt == PF_PixelFormat_ARGB32) {
             ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines,
