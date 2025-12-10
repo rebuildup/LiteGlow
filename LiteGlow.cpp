@@ -528,10 +528,8 @@ SmartPreRender(PF_InData* in_data, PF_OutData* out_data, PF_PreRenderExtra* pre)
     PF_RenderRequest req = pre->input->output_request;
     PF_CheckoutResult in_result;
 
-    // Advertise GPU only when the host actually offers a GPU context.
-    if (in_data->what_gpu != PF_GPU_Framework_None) {
-        pre->output->flags |= PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
-    }
+    // Advertise GPU path; host will choose CPU if GPU unavailable.
+    pre->output->flags |= PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
 
     ERR(pre->cb->checkout_layer(
         in_data->effect_ref,
