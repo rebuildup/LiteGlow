@@ -30,10 +30,9 @@ GlobalSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
         PF_OutFlag_PIX_INDEPENDENT |
         PF_OutFlag_DEEP_COLOR_AWARE;
 
-    // Enable threaded rendering + Smart Render + 32bpc awareness
+    // Enable threaded rendering + Smart Render (8/16bpc)
     out_data->out_flags2 = PF_OutFlag2_SUPPORTS_THREADED_RENDERING |
-        PF_OutFlag2_SUPPORTS_SMART_RENDER |
-        PF_OutFlag2_FLOAT_COLOR_AWARE;
+        PF_OutFlag2_SUPPORTS_SMART_RENDER;
 
     return PF_Err_NONE;
 }
@@ -378,11 +377,9 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
         return PF_Err_BAD_CALLBACK_PARAM;
     }
 
-    PF_IterateFloatSuite2* iterateFloatSuite = NULL;
-    bool float_suite_acquired = false;
     if (pixfmt == PF_PixelFormat_ARGB128) {
-        ERR(AEFX_AcquireSuite(in_data, out_data, kPFIterateFloatSuite, kPFIterateFloatSuiteVersion2, NULL, (void**)&iterateFloatSuite));
-        float_suite_acquired = (iterateFloatSuite != NULL);
+        // We no longer support 32f directly; let AE convert or fall back.
+        return PF_COPY(inputW, outputW, NULL, NULL);
     }
 
     // Allocate temporary worlds
@@ -403,14 +400,7 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines,
                 inputW, NULL, &bp, BrightPass16, &brightW));
         }
-        else { // PF_PixelFormat_ARGB128
-            if (iterateFloatSuite) {
-                ERR(iterateFloatSuite->iterate(in_data, 0, lines,
-                inputW, NULL, &bp, BrightPassF, &brightW));
-            } else {
-                err = PF_Err_BAD_CALLBACK_PARAM;
-            }
-        }
+        else { /* no-op */ }
     }
 
     if (!err) {
@@ -423,13 +413,7 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
         else if (pixfmt == PF_PixelFormat_ARGB64) {
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines, &brightW, NULL, &bi, BlurH16, &blurH));
         }
-        else {
-            if (iterateFloatSuite) {
-                ERR(iterateFloatSuite->iterate(in_data, 0, lines, &brightW, NULL, &bi, BlurHF, &blurH));
-            } else {
-                err = PF_Err_BAD_CALLBACK_PARAM;
-            }
-        }
+        else { /* no-op */ }
     }
 
     if (!err) {
@@ -442,13 +426,7 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
         else if (pixfmt == PF_PixelFormat_ARGB64) {
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines, &blurH, NULL, &bi, BlurV16, &blurV));
         }
-        else {
-            if (iterateFloatSuite) {
-                ERR(iterateFloatSuite->iterate(in_data, 0, lines, &blurH, NULL, &bi, BlurVF, &blurV));
-            } else {
-                err = PF_Err_BAD_CALLBACK_PARAM;
-            }
-        }
+        else { /* no-op */ }
     }
 
     if (!err) {
@@ -463,23 +441,13 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], P
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines,
                 inputW, NULL, &bl, BlendScreen16, outputW));
         }
-        else {
-            if (iterateFloatSuite) {
-                ERR(iterateFloatSuite->iterate(in_data, 0, lines,
-                inputW, NULL, &bl, BlendScreenF, outputW));
-            } else {
-                err = PF_Err_BAD_CALLBACK_PARAM;
-            }
-        }
+        else { /* no-op */ }
     }
 
     // Dispose temps
     worldSuite->PF_DisposeWorld(in_data->effect_ref, &brightW);
     worldSuite->PF_DisposeWorld(in_data->effect_ref, &blurH);
     worldSuite->PF_DisposeWorld(in_data->effect_ref, &blurV);
-    if (float_suite_acquired && iterateFloatSuite) {
-        (void)AEFX_ReleaseSuite(in_data, out_data, kPFIterateFloatSuite, kPFIterateFloatSuiteVersion2, NULL);
-    }
 
     return err;
 }
