@@ -31,8 +31,7 @@ GlobalSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
         PF_OutFlag_DEEP_COLOR_AWARE;
 
     // Enable threaded rendering + Smart Render (8/16bpc)
-    out_data->out_flags2 = PF_OutFlag2_SUPPORTS_THREADED_RENDERING |
-        PF_OutFlag2_SUPPORTS_SMART_RENDER;
+    out_data->out_flags2 = 0; // no smart render / no float
 
     return PF_Err_NONE;
 }
@@ -497,47 +496,6 @@ EffectMain(
         case PF_Cmd_GLOBAL_SETUP:   err = GlobalSetup(in_data, out_data, params, output); break;
         case PF_Cmd_PARAMS_SETUP:   err = ParamsSetup(in_data, out_data, params, output); break;
         case PF_Cmd_RENDER:         err = Render(in_data, out_data, params, output); break;
-        case PF_Cmd_SMART_RENDER:
-        {
-            PF_SmartRenderExtra* extraP = (PF_SmartRenderExtra*)extra;
-            PF_EffectWorld* input_worldP = nullptr;
-            PF_EffectWorld* output_worldP = nullptr;
-
-            ERR(extraP->cb->checkout_layer_pixels(in_data->effect_ref, LITEGLOW_INPUT, &input_worldP));
-            ERR(extraP->cb->checkout_output(in_data->effect_ref, &output_worldP));
-
-            if (!err) {
-                err = ProcessWorlds(in_data, out_data, params, input_worldP, output_worldP);
-            }
-
-            extraP->cb->checkin_layer_pixels(in_data->effect_ref, LITEGLOW_INPUT);
-        }
-        break;
-        case PF_Cmd_SMART_PRE_RENDER:
-        {
-            PF_PreRenderExtra* pre = (PF_PreRenderExtra*)extra;
-            PF_RenderRequest req = pre->input->output_request;
-            PF_CheckoutResult in_result;
-
-            // Checkout input to derive rects
-            ERR(pre->cb->checkout_layer(
-                in_data->effect_ref,
-                LITEGLOW_INPUT,
-                LITEGLOW_INPUT,
-                &req,
-                in_data->current_time,
-                in_data->time_step,
-                in_data->time_scale,
-                &in_result));
-
-            // Pass through requested rectangles
-            pre->output->result_rect = in_result.result_rect;
-            pre->output->max_result_rect = in_result.max_result_rect;
-
-            // No pre-render data to keep
-            pre->output->pre_render_data = NULL;
-        }
-        break;
         default: break;
         }
     }
