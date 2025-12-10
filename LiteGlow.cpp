@@ -25,9 +25,10 @@ GlobalSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
     out_data->my_version = LITEGLOW_VERSION_VALUE;
 
     out_data->out_flags =
-        PF_OutFlag_PIX_INDEPENDENT;
+        PF_OutFlag_PIX_INDEPENDENT |
+        PF_OutFlag_DEEP_COLOR_AWARE;
 
-    // Match PiPL: threaded render only (no float color aware)
+    // Match PiPL: threaded render only
     out_data->out_flags2 = PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
 
     return PF_Err_NONE;
