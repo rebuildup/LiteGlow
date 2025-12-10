@@ -102,8 +102,23 @@ GlobalSetup(
         PF_OutFlag_SEND_UPDATE_PARAMS_UI;
 
     // Smart Render + threaded rendering + 32-bit float aware + GPU bits.
-    // PF_OutFlag2_I_MIX_GUID_DEPENDENCIES is NOT set to avoid GuidMixInPtr requirement.
-    out_data->out_flags2 = 0x0A301400;
+    // Keep PF_OutFlag2_I_MIX_GUID_DEPENDENCIES clear to avoid GuidMixInPtr requirement.
+    const PF_OutFlags2 kOutFlags2Code =
+        PF_OutFlag2_FLOAT_COLOR_AWARE |
+        PF_OutFlag2_SUPPORTS_SMART_RENDER |
+        PF_OutFlag2_SUPPORTS_THREADED_RENDERING |
+        PF_OutFlag2_SUPPORTS_GPU_RENDER_F32 |
+        PF_OutFlag2_SUPPORTS_DIRECTX_RENDERING;
+
+    out_data->out_flags2 = kOutFlags2Code;
+
+#if defined(_DEBUG)
+    {
+        char dbg[128];
+        snprintf(dbg, sizeof(dbg), "LiteGlow GlobalSetup out_flags2=0x%08X\n", (unsigned)kOutFlags2Code);
+        OutputDebugStringA(dbg);
+    }
+#endif
 
     // Premiere uses pixel format suite; AE will ignore this block.
     if (in_data->appl_id == 'PrMr') {
