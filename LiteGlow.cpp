@@ -665,8 +665,8 @@ ExtractBrightAreas8(
     // Use only brightness (edge detection removed for speed)
     float intensity = perceivedBrightness;
 
-    // Apply threshold with smooth falloff
-    float threshold_falloff = 0.1f;
+    // Apply threshold with smoother falloff to keep effect visible
+    float threshold_falloff = 0.02f;
     float glow_amount = 0.0f;
 
     if (intensity > threshold) {
@@ -737,8 +737,8 @@ ExtractBrightAreas16(
     // Use only brightness (edge detection removed for speed)
     float intensity = perceivedBrightness;
 
-    // Apply threshold with smooth falloff
-    float threshold_falloff = 0.1f;
+    // Apply threshold with smoother falloff to keep effect visible
+    float threshold_falloff = 0.02f;
     float glow_amount = 0.0f;
 
     if (intensity > threshold) {
@@ -1706,11 +1706,12 @@ SmartRender(
         ERR(world_suite->PF_GetPixelFormat(input_worldP, &pixel_format));
 
         if (!err) {
-            if (isGPU && pixel_format == PF_PixelFormat_GPU_BGRA128) {
+            const bool gpu_pixels = (pixel_format == PF_PixelFormat_GPU_BGRA128);
+
+            if (isGPU || gpu_pixels) {
                 ERR(SmartRenderGPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, infoP, areaP));
             }
             else {
-                // Host may not call SMART_RENDER_GPU; fall back to CPU unless we truly have GPU pixels.
                 ERR(SmartRenderCPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, infoP, areaP));
             }
         }

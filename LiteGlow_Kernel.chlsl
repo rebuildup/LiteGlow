@@ -46,7 +46,8 @@ void main(uint3 dtid : SV_DispatchThreadID)
     float4 basePixel = asfloat(baseRaw);
 
     float baseLuma = dot(basePixel.rgb, kLumaWeights);
-    float mask = saturate((baseLuma - threshold) * 4.0f);
+    // Softer mask so effect appears at lower luminance
+    float mask = saturate((baseLuma - threshold) * 8.0f + 0.05f);
 
     const int SAMPLES_PER_DIR = 4;
     float rad = max(radius, 1.0f);
@@ -96,11 +97,8 @@ void main(uint3 dtid : SV_DispatchThreadID)
 
     float3 glow = accum / totalW;
 
-    // Match CPU strength curve: linear up to 3000, then quadratic boost.
-    float strengthScale = (strength <= 3000.0f)
-        ? (strength / 1000.0f)
-        : (3.0f + pow((strength - 3000.0f) / 7000.0f, 2.0f) * 10.0f);
-    float gain = saturate(0.35f + strengthScale * 0.4f);
+    // Strength mapping: 0..2000 -> gain 0..3 (clamped)
+    float gain = saturate(strength * 0.0015f); // 2000 -> 3.0
     glow *= gain;
     glow = saturate(glow);
 
