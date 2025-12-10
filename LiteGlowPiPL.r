@@ -34,17 +34,19 @@ resource 'PiPL' (16000) {
             PF_PLUG_IN_VERSION,
             PF_PLUG_IN_SUBVERS
         },
+        // Keep version in sync with LiteGlow.cpp
+        #define LITEGLOW_VERSION PF_VERSION(1,0,0,PF_Stage_DEVELOP,1)
         AE_Effect_Version {
-            528385  // PF_VERSION(1,0,0,PF_Stage_DEVELOP,1)
+            LITEGLOW_VERSION
         },
         AE_Effect_Info_Flags {
             0
         },
         AE_Effect_Global_OutFlags {
-            0x06000400
+            0x02000400  // PF_OutFlag_DEEP_COLOR_AWARE | PF_OutFlag_PIX_INDEPENDENT
         },
         AE_Effect_Global_OutFlags_2 {
-            0x00000000
+            0x08000000  // PF_OutFlag2_SUPPORTS_THREADED_RENDERING
         },
         AE_Effect_Match_Name {
             "361do LiteGlow"

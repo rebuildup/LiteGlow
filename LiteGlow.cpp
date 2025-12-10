@@ -28,7 +28,8 @@ GlobalSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
         PF_OutFlag_DEEP_COLOR_AWARE |
         PF_OutFlag_PIX_INDEPENDENT;
 
-    out_data->out_flags2 = 0; // simple render only
+    out_data->out_flags2 =
+        PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
 
     return PF_Err_NONE;
 }
@@ -285,7 +286,8 @@ Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_Layer
         return PF_COPY(&params[LITEGLOW_INPUT]->u.ld, output, NULL, NULL);
     }
 
-    PF_Boolean is_deep = PF_WORLD_IS_DEEP(output);
+    PF_EffectWorld* inputW = &params[LITEGLOW_INPUT]->u.ld;
+    PF_Boolean is_deep = PF_WORLD_IS_DEEP(inputW);
 
     // Allocate temporary worlds
     PF_EffectWorld brightW, blurH, blurV;
@@ -299,11 +301,11 @@ Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_Layer
         A_long lines = output->height;
         if (is_deep) {
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines,
-                &params[LITEGLOW_INPUT]->u.ld, NULL, &bp, BrightPass16, &brightW));
+                inputW, NULL, &bp, BrightPass16, &brightW));
         }
         else {
             ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines,
-                &params[LITEGLOW_INPUT]->u.ld, NULL, &bp, BrightPass8, &brightW));
+                inputW, NULL, &bp, BrightPass8, &brightW));
         }
     }
 
@@ -337,11 +339,11 @@ Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_Layer
         A_long lines = output->height;
         if (is_deep) {
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines,
-                &params[LITEGLOW_INPUT]->u.ld, NULL, &bl, BlendScreen16, output));
+                inputW, NULL, &bl, BlendScreen16, output));
         }
         else {
             ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines,
-                &params[LITEGLOW_INPUT]->u.ld, NULL, &bl, BlendScreen8, output));
+                inputW, NULL, &bl, BlendScreen8, output));
         }
     }
 
