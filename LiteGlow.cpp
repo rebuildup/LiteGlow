@@ -103,7 +103,8 @@ GlobalSetup(
 
     // Smart Render + threaded rendering.
     out_data->out_flags2 = PF_OutFlag2_SUPPORTS_SMART_RENDER |
-        PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
+        PF_OutFlag2_SUPPORTS_THREADED_RENDERING |
+        PF_OutFlag2_FLOAT_COLOR_AWARE;
 
     // GPU support: Premiere uses pixel format suite, AE uses GPU flags directly.
     if (in_data->appl_id == 'PrMr') {
@@ -1495,6 +1496,7 @@ PreRender(
     PF_CheckoutResult in_result;
     PF_RenderRequest req = extraP->input->output_request;
 
+    // Hint AE that GPU render is possible for this frame.
     extraP->output->flags |= PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
 
     LiteGlowRenderParams* infoP = reinterpret_cast<LiteGlowRenderParams*>(
@@ -1527,15 +1529,42 @@ PreRender(
         in_data->current_time, in_data->time_step, in_data->time_scale, &cur_param));
     infoP->quality = cur_param.u.pd.value;
 
-    // Downsample info
-    float downscale_x = static_cast<float>(in_data->downsample_x.den) / static_cast<float>(in_data->downsample_x.num);
-    float downscale_y = static_cast<float>(in_data->downsample_y.den) / static_cast<float>(in_data->downsample_y.num);
+    // Downsample info (SmartFX coordinates)
+    const float downscale_x = static_cast<float>(in_data->downsample_x.den) / static_cast<float>(in_data->downsample_x.num);
+    const float downscale_y = static_cast<float>(in_data->downsample_y.den) / static_cast<float>(in_data->downsample_y.num);
     infoP->resolution_factor = MIN(downscale_x, downscale_y);
 
     extraP->output->pre_render_data = infoP;
     extraP->output->delete_pre_render_data_func = DisposePreRenderData;
 
-    // Checkout input to compute result rectangles
+    // ------------------------------------------------------------------
+    // ROI tightening: expand only by the blur kernel footprint so AE will
+    // allocate/checkout the minimum rectangle for SmartFX processing.
+    // ------------------------------------------------------------------
+    const float adjusted_radius =
+        (infoP->resolution_factor < 0.9f)
+        ? infoP->radius * MAX(0.5f, infoP->resolution_factor)
+        : infoP->radius;
+
+    float sigma = adjusted_radius;
+    switch (infoP->quality) {
+    case QUALITY_LOW:    sigma = adjusted_radius * 0.5f; break;
+    case QUALITY_MEDIUM: sigma = adjusted_radius * 0.75f; break;
+    case QUALITY_HIGH:
+    default:             sigma = adjusted_radius; break;
+    }
+
+    int kernel_radius = MIN(KERNEL_SIZE_MAX / 2, (int)(3.0f * sigma + 0.5f));
+    const A_long margin = (A_long)MAX(1, kernel_radius); // safe expansion per axis
+
+    PF_LRect requested = req.rect;
+    requested.left   -= margin;
+    requested.top    -= margin;
+    requested.right  += margin;
+    requested.bottom += margin;
+    req.rect = requested;
+
+    // Checkout input to compute (clipped) result rectangles
     ERR(extraP->cb->checkout_layer(
         in_data->effect_ref,
         LITEGLOW_INPUT,
@@ -1546,8 +1575,8 @@ PreRender(
         in_data->time_scale,
         &in_result));
 
-    UnionLRect(&in_result.result_rect, &extraP->output->result_rect);
-    UnionLRect(&in_result.max_result_rect, &extraP->output->max_result_rect);
+    extraP->output->result_rect     = in_result.result_rect;
+    extraP->output->max_result_rect = in_result.max_result_rect;
 
     return err;
 }
