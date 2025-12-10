@@ -30,9 +30,11 @@ GlobalSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
         PF_OutFlag_PIX_INDEPENDENT |
         PF_OutFlag_DEEP_COLOR_AWARE;
 
-    // Enable threaded rendering + Smart Render (8/16bpc)
-    // Enable MFR-safe threading (no smart render, no float color aware)
-    out_data->out_flags2 = PF_OutFlag2_SUPPORTS_THREADED_RENDERING;
+    // Enable threaded rendering + Smart Render + GPU declaration (GPU path will safely fall back)
+    out_data->out_flags2 = PF_OutFlag2_SUPPORTS_THREADED_RENDERING |
+        PF_OutFlag2_SUPPORTS_SMART_RENDER |
+        PF_OutFlag2_SUPPORTS_GPU_RENDER_F32 |
+        PF_OutFlag2_SUPPORTS_DIRECTX_RENDERING;
 
     return PF_Err_NONE;
 }
@@ -460,6 +462,70 @@ Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_Layer
     return ProcessWorlds(in_data, out_data, params, inputW, outputW);
 }
 
+// ---- Smart Render helpers (safe CPU fallback) ----
+static PF_Err
+SmartPreRender(PF_InData* in_data, PF_OutData* out_data, PF_PreRenderExtra* pre)
+{
+    PF_Err err = PF_Err_NONE;
+    PF_RenderRequest req = pre->input->output_request;
+    PF_CheckoutResult in_result;
+
+    pre->output->flags |= PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
+
+    ERR(pre->cb->checkout_layer(
+        in_data->effect_ref,
+        LITEGLOW_INPUT,
+        LITEGLOW_INPUT,
+        &req,
+        in_data->current_time,
+        in_data->time_step,
+        in_data->time_scale,
+        &in_result));
+
+    pre->output->result_rect = in_result.result_rect;
+    pre->output->max_result_rect = in_result.max_result_rect;
+    pre->output->pre_render_data = NULL;
+
+    return err;
+}
+
+static PF_Err
+SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extraP)
+{
+    PF_Err err = PF_Err_NONE;
+    PF_EffectWorld* input_worldP = nullptr;
+    PF_EffectWorld* output_worldP = nullptr;
+
+    ERR(extraP->cb->checkout_layer_pixels(in_data->effect_ref, LITEGLOW_INPUT, &input_worldP));
+    ERR(extraP->cb->checkout_output(in_data->effect_ref, &output_worldP));
+
+    if (!err) {
+        err = ProcessWorlds(in_data, out_data, extraP->input->params, input_worldP, output_worldP);
+    }
+
+    extraP->cb->checkin_layer_pixels(in_data->effect_ref, LITEGLOW_INPUT);
+    return err;
+}
+
+static PF_Err
+SmartRenderGPU(PF_InData* /*in_data*/, PF_OutData* /*out_data*/, PF_SmartRenderExtra* /*extraP*/)
+{
+    // Force host to fall back to CPU smart render
+    return PF_Err_BAD_CALLBACK_PARAM;
+}
+
+static PF_Err
+GPUDeviceSetup(PF_InData* /*in_data*/, PF_OutData* /*out_data*/, PF_GPUDeviceSetupExtra* /*extraP*/)
+{
+    return PF_Err_NONE;
+}
+
+static PF_Err
+GPUDeviceSetdown(PF_InData* /*in_data*/, PF_OutData* /*out_data*/, PF_GPUDeviceSetdownExtra* /*extraP*/)
+{
+    return PF_Err_NONE;
+}
+
 // -------- Entry ----------
 extern "C" DllExport
 PF_Err PluginDataEntryFunction2(
@@ -497,6 +563,11 @@ EffectMain(
         case PF_Cmd_GLOBAL_SETUP:   err = GlobalSetup(in_data, out_data, params, output); break;
         case PF_Cmd_PARAMS_SETUP:   err = ParamsSetup(in_data, out_data, params, output); break;
         case PF_Cmd_RENDER:         err = Render(in_data, out_data, params, output); break;
+        case PF_Cmd_SMART_PRE_RENDER: err = SmartPreRender(in_data, out_data, (PF_PreRenderExtra*)extra); break;
+        case PF_Cmd_SMART_RENDER:     err = SmartRender(in_data, out_data, (PF_SmartRenderExtra*)extra); break;
+        case PF_Cmd_SMART_RENDER_GPU: err = SmartRenderGPU(in_data, out_data, (PF_SmartRenderExtra*)extra); break;
+        case PF_Cmd_GPU_DEVICE_SETUP: err = GPUDeviceSetup(in_data, out_data, (PF_GPUDeviceSetupExtra*)extra); break;
+        case PF_Cmd_GPU_DEVICE_SETDOWN: err = GPUDeviceSetdown(in_data, out_data, (PF_GPUDeviceSetdownExtra*)extra); break;
         default: break;
         }
     }

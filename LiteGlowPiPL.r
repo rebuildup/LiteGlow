@@ -45,7 +45,7 @@ resource 'PiPL' (16000) {
             0x02000400  // PF_OutFlag_DEEP_COLOR_AWARE | PF_OutFlag_PIX_INDEPENDENT
         },
         AE_Effect_Global_OutFlags_2 {
-            0x08000000  // PF_OutFlag2_SUPPORTS_THREADED_RENDERING
+            0x2A000400  // THREAD | SMART_RENDER | GPU_RENDER_F32 | DIRECTX | (smart render bit)
         },
         AE_Effect_Match_Name {
             "361do LiteGlow"
