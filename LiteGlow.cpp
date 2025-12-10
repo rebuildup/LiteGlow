@@ -1,5 +1,6 @@
 #include "LiteGlow.h"
 #include "AEGP_SuiteHandler.h"
+#include "AEFX_SuiteHelper.h"
 #include "AE_EffectPixelFormat.h"
 #include <math.h>
 
@@ -370,7 +371,7 @@ Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_Layer
 
     PF_EffectWorld* inputW = &params[LITEGLOW_INPUT]->u.ld;
 
-    AEFX_SuiteScoper<PF_WorldSuite2> worldSuite(in_data, kPFWorldSuite, kPFWorldSuiteVersion2, out_data);
+    AEFX_SuiteHelperT<PF_WorldSuite2> worldSuite(in_data, out_data, kPFWorldSuite, kPFWorldSuiteVersion2);
     PF_PixelFormat pixfmt = PF_PixelFormat_INVALID;
     ERR(worldSuite->PF_GetPixelFormat(inputW, &pixfmt));
     if (pixfmt == PF_PixelFormat_INVALID) {
