@@ -1,6 +1,5 @@
 #include "AEConfig.h"
 #include "AE_EffectVers.h"
-#include "LiteGlow_Version.h"
 
 #ifndef AE_OS_WIN
     #include <AE_General.r>
@@ -36,7 +35,7 @@ resource 'PiPL' (16000) {
             PF_PLUG_IN_SUBVERS
         },
         AE_Effect_Version {
-            LITEGLOW_VERSION_VALUE
+            528385  // PF_VERSION(1,0,0,PF_Stage_DEVELOP,1)
         },
         AE_Effect_Info_Flags {
             0
