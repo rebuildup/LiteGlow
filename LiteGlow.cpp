@@ -46,7 +46,7 @@ typedef struct
     int   dstPitch;
     int   width;
     int   height;
-    float strength;
+    float strengthNorm;
     float threshold;
     float radius;
     int   quality;
@@ -102,13 +102,9 @@ GlobalSetup(
         PF_OutFlag_SEND_UPDATE_PARAMS_UI;
 
     // Smart Render + threaded rendering + 32-bit float aware + GPU bits.
-    // Keep PF_OutFlag2_I_MIX_GUID_DEPENDENCIES clear to avoid GuidMixInPtr requirement.
-    const PF_OutFlags2 kOutFlags2Code =
-        PF_OutFlag2_FLOAT_COLOR_AWARE |
-        PF_OutFlag2_SUPPORTS_SMART_RENDER |
-        PF_OutFlag2_SUPPORTS_THREADED_RENDERING |
-        PF_OutFlag2_SUPPORTS_GPU_RENDER_F32 |
-        PF_OutFlag2_SUPPORTS_DIRECTX_RENDERING;
+    // PiPLと一致させるため、明示的に値を設定（0x0A301400）
+    // I_MIX_GUID_DEPENDENCIESは含まれていないため、GuidMixInPtrは不要
+    const PF_OutFlags2 kOutFlags2Code = 0x0A301400;
 
     out_data->out_flags2 = kOutFlags2Code;
 
@@ -472,15 +468,13 @@ ExtractBrightAreas8(
 {
     GlowDataP gdata = reinterpret_cast<GlowDataP>(refcon);
 
-    // Scale strength for more powerful effect
-    float strength = 0.0f;
-    if (gdata->strength <= 3000.0f) {
-        strength = gdata->strength / 1000.0f;
-    }
-    else {
-        float base = 3.0f;
-        float excess = (gdata->strength - 3000.0f) / 7000.0f;
-        strength = base + (excess * excess * 10.0f);
+    // Scale strength for more powerful effect (0-10000 range)
+    float strength = gdata->strength / 1000.0f;
+    
+    // 非線形カーブを適用して高強度でより効果的に
+    if (strength > 5.0f) {
+        float excess = (strength - 5.0f) / 5.0f; // 0-1 range for 5000-10000
+        strength = 5.0f + (excess * excess * 15.0f); // 最大20倍の強度
     }
 
     float threshold = gdata->threshold / 255.0f;
@@ -563,15 +557,13 @@ ExtractBrightAreas16(
 {
     GlowDataP gdata = reinterpret_cast<GlowDataP>(refcon);
 
-    // Scale strength for more powerful effect
-    float strength = 0.0f;
-    if (gdata->strength <= 3000.0f) {
-        strength = gdata->strength / 1000.0f;
-    }
-    else {
-        float base = 3.0f;
-        float excess = (gdata->strength - 3000.0f) / 7000.0f;
-        strength = base + (excess * excess * 10.0f);
+    // Scale strength for more powerful effect (0-10000 range)
+    float strength = gdata->strength / 1000.0f;
+    
+    // 非線形カーブを適用して高強度でより効果的に
+    if (strength > 5.0f) {
+        float excess = (strength - 5.0f) / 5.0f; // 0-1 range for 5000-10000
+        strength = 5.0f + (excess * excess * 15.0f); // 最大20倍の強度
     }
 
     float threshold = gdata->threshold / 255.0f;
@@ -801,7 +793,7 @@ BlendGlow8(
     PF_Pixel8* glowP = GetPixel8(glowWorld, xL, yL);
 
     // Enhanced blending logic
-    if (quality == QUALITY_HIGH || strength > 3000.0f) {
+    if (quality == QUALITY_HIGH || strength > 2000.0f) {
         // Screen blend with additional highlight preservation
         float rs = 1.0f - ((1.0f - inP->red / 255.0f) * (1.0f - glowP->red / 255.0f));
         float gs = 1.0f - ((1.0f - inP->green / 255.0f) * (1.0f - glowP->green / 255.0f));
@@ -810,9 +802,11 @@ BlendGlow8(
         // Add highlight boost where glow is concentrated
         float glow_intensity = (glowP->red + glowP->green + glowP->blue) / (3.0f * 255.0f);
 
-        // Scale highlight boost with strength
-        float highlight_factor = (strength > 3000.0f) ?
-            0.2f + ((strength - 3000.0f) / 7000.0f) * 0.4f : 0.2f;
+        // Scale highlight boost with strength (0-10000 range)
+        float highlight_factor = 0.2f;
+        if (strength > 2000.0f) {
+            highlight_factor = 0.2f + ((strength - 2000.0f) / 8000.0f) * 0.6f;
+        }
 
         float highlight_boost = 1.0f + glow_intensity * highlight_factor;
 
@@ -823,7 +817,7 @@ BlendGlow8(
 
         // For extreme high strength (> 7000), add extra glow intensity boost
         if (strength > 7000.0f) {
-            float extreme_boost = (strength - 7000.0f) / 3000.0f * 0.5f;
+            float extreme_boost = ((strength - 7000.0f) / 3000.0f) * 0.5f;
             outP->red = (A_u_char)MIN(255.0f, outP->red * (1.0f + extreme_boost));
             outP->green = (A_u_char)MIN(255.0f, outP->green * (1.0f + extreme_boost));
             outP->blue = (A_u_char)MIN(255.0f, outP->blue * (1.0f + extreme_boost));
@@ -860,7 +854,7 @@ BlendGlow16(
     PF_Pixel16* glowP = GetPixel16(glowWorld, xL, yL);
 
     // Enhanced blending logic
-    if (quality == QUALITY_HIGH || strength > 3000.0f) {
+    if (quality == QUALITY_HIGH || strength > 2000.0f) {
         // Screen blend with additional highlight preservation
         float rs = 1.0f - ((1.0f - inP->red / 32768.0f) * (1.0f - glowP->red / 32768.0f));
         float gs = 1.0f - ((1.0f - inP->green / 32768.0f) * (1.0f - glowP->green / 32768.0f));
@@ -869,9 +863,11 @@ BlendGlow16(
         // Add highlight boost where glow is concentrated
         float glow_intensity = (glowP->red + glowP->green + glowP->blue) / (3.0f * 32768.0f);
 
-        // Scale highlight boost with strength
-        float highlight_factor = (strength > 3000.0f) ?
-            0.2f + ((strength - 3000.0f) / 7000.0f) * 0.4f : 0.2f;
+        // Scale highlight boost with strength (0-10000 range)
+        float highlight_factor = 0.2f;
+        if (strength > 2000.0f) {
+            highlight_factor = 0.2f + ((strength - 2000.0f) / 8000.0f) * 0.6f;
+        }
 
         float highlight_boost = 1.0f + glow_intensity * highlight_factor;
 
@@ -882,7 +878,7 @@ BlendGlow16(
 
         // For extreme high strength (> 7000), add extra glow intensity boost
         if (strength > 7000.0f) {
-            float extreme_boost = (strength - 7000.0f) / 3000.0f * 0.5f;
+            float extreme_boost = ((strength - 7000.0f) / 3000.0f) * 0.5f;
             outP->red = (A_u_short)MIN(32768.0f, outP->red * (1.0f + extreme_boost));
             outP->green = (A_u_short)MIN(32768.0f, outP->green * (1.0f + extreme_boost));
             outP->blue = (A_u_short)MIN(32768.0f, outP->blue * (1.0f + extreme_boost));
@@ -1317,7 +1313,6 @@ GPUDeviceSetup(
             dx_gpu_data->glowShader));
 
         extraP->output->gpu_data = gpu_dataH;
-        out_data->out_flags2 |= PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
     }
 
     return err;
@@ -1448,7 +1443,7 @@ SmartRenderGPU(
     gpuParams.dstPitch = (int)(dst_row_bytes / bytes_per_pixel);
 
     // Convert effect parameters from pre-render cache
-    gpuParams.strength = params->strength / (float)STRENGTH_MAX;
+    gpuParams.strengthNorm = params->strength / (float)STRENGTH_MAX;
     gpuParams.threshold = params->threshold; // already 0..1
     gpuParams.radius = params->radius;
     gpuParams.quality = params->quality;

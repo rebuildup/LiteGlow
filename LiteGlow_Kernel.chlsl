@@ -54,71 +54,73 @@ void main(uint3 dtid : SV_DispatchThreadID)
         return;
     }
 
-    const int SAMPLES_PER_DIR = 4;
+    // 品質に応じてサンプル数を調整
+    int samplesPerDir = quality == 3 ? 8 : (quality == 2 ? 6 : 4);
     float rad = max(radius, 1.0f);
-    float sigma = max(rad * 0.75f, 1.0f);
+    float sigma = rad * 0.4f;  // より広い分布のために調整
 
-    // Precompute sample distances and Gaussian weights once per pixel
-    float distances[SAMPLES_PER_DIR];
-    float weights[SAMPLES_PER_DIR];
-
-    [unroll]
-    for (int s = 0; s < SAMPLES_PER_DIR; ++s)
-    {
-        float t = (float)(s + 1) / (float)SAMPLES_PER_DIR;
-        float dist = rad * t;
-        distances[s] = dist;
-        weights[s] = Gaussian1D(dist, sigma);
-    }
-
-    static const float2 dirs[8] = {
-        float2(1.0f, 0.0f),
-        float2(-1.0f, 0.0f),
-        float2(0.0f, 1.0f),
-        float2(0.0f, -1.0f),
-        float2(0.7071f, 0.7071f),
-        float2(-0.7071f, 0.7071f),
-        float2(0.7071f, -0.7071f),
-        float2(-0.7071f, -0.7071f)
+    // より多くの方向をサンプリング（16方向で滑らかなグロー）
+    static const float2 dirs[16] = {
+        float2(1.0f, 0.0f),      float2(-1.0f, 0.0f),
+        float2(0.0f, 1.0f),      float2(0.0f, -1.0f),
+        float2(0.7071f, 0.7071f),   float2(-0.7071f, 0.7071f),
+        float2(0.7071f, -0.7071f),  float2(-0.7071f, -0.7071f),
+        float2(0.9239f, 0.3827f),   float2(-0.9239f, 0.3827f),
+        float2(0.3827f, 0.9239f),   float2(-0.3827f, 0.9239f),
+        float2(0.9239f, -0.3827f),  float2(-0.9239f, -0.3827f),
+        float2(0.3827f, -0.9239f),  float2(-0.3827f, -0.9239f)
     };
 
-    float3 accum = basePixel.rgb;
-    float totalW = 1.0f;
+    float3 accum = basePixel.rgb * mask;
+    float totalW = mask;
 
-    [unroll]
-    for (int d = 0; d < 8; ++d)
+    int numDirections = quality >= 2 ? 16 : 8;
+
+    // 方向ごとにサンプリング
+    for (int d = 0; d < numDirections; ++d)
     {
         float2 dir = dirs[d];
 
-        [unroll]
-        for (int s = 0; s < SAMPLES_PER_DIR; ++s)
+        // 距離ごとにサンプリング
+        for (int s = 1; s <= samplesPerDir; ++s)
         {
-            float dist = distances[s];
-            float w = weights[s];
+            float t = (float)s / (float)samplesPerDir;
+            float dist = rad * t;
+            float w = Gaussian1D(dist, sigma);
 
             int sx = (int)(x + dir.x * dist + 0.5f);
             int sy = (int)(y + dir.y * dist + 0.5f);
 
-            sx = clamp(sx, 0, width - 1);
-            sy = clamp(sy, 0, height - 1);
-
-            float4 sample = asfloat(LoadPixel((uint)sx, (uint)sy));
-            float lum = dot(sample.rgb, kLumaWeights);
-
-            if (lum > threshold)
+            // 境界チェック
+            if (sx >= 0 && sx < width && sy >= 0 && sy < height)
             {
-                accum += sample.rgb * w;
-                totalW += w;
+                float4 sample = asfloat(LoadPixel((uint)sx, (uint)sy));
+                float lum = dot(sample.rgb, kLumaWeights);
+
+                // 閾値を超える明るいピクセルのみを考慮
+                if (lum > threshold)
+                {
+                    float sampleMask = saturate((lum - threshold) * 4.0f);
+                    accum += sample.rgb * w * sampleMask;
+                    totalW += w * sampleMask;
+                }
             }
         }
     }
 
-    float3 glow = accum / totalW;
-    glow *= saturate(0.5f + strengthNorm * 1.5f);
-    glow = saturate(glow);
-
-    float3 screenColor = 1.0f - (1.0f - basePixel.rgb) * (1.0f - glow);
-    float3 finalColor = lerp(basePixel.rgb, screenColor, mask);
+    // グローの計算
+    float3 glow = totalW > 0.0f ? (accum / totalW) : basePixel.rgb;
+    
+    // 強度を適用（より強力なグロー効果）
+    float glowStrength = saturate(strengthNorm * 2.0f);
+    glow *= (1.0f + glowStrength * 2.0f);
+    
+    // スクリーンブレンドで元の画像と合成
+    float3 screenColor = 1.0f - (1.0f - basePixel.rgb) * (1.0f - saturate(glow));
+    
+    // さらに加算ブレンドを追加して強いグローを実現
+    float3 additiveGlow = glow * glowStrength * 0.5f;
+    float3 finalColor = saturate(screenColor + additiveGlow);
 
     StorePixel(x, y, float4(finalColor, basePixel.a));
 }
