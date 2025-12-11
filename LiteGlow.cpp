@@ -538,8 +538,8 @@ SmartPreRender(PF_InData* in_data, PF_OutData* out_data, PF_PreRenderExtra* pre)
         in_data->time_scale,
         &in_result));
 
-    UnionLRect(&in_result.result_rect, &pre->output->result_rect);
-    UnionLRect(&in_result.max_result_rect, &pre->output->max_result_rect);
+    pre->output->result_rect = in_result.result_rect;
+    pre->output->max_result_rect = in_result.max_result_rect;
 
     // MFR対応: pre_render_data を使用せず、SmartRender内でパラメータをチェックアウトする
     // SmartFX では AE がチェックアウトしたパラメータを自動的に解放するため安全
