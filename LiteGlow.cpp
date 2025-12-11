@@ -538,28 +538,11 @@ SmartPreRender(PF_InData* in_data, PF_OutData* out_data, PF_PreRenderExtra* pre)
         in_data->time_scale,
         &in_result));
 
-    pre->output->result_rect = in_result.result_rect;
-    pre->output->max_result_rect = in_result.max_result_rect;
-    // Cache params we need for SmartRender
-    LiteGlowSettings* s = (LiteGlowSettings*)malloc(sizeof(LiteGlowSettings));
-    if (s) {
-        PF_ParamDef cur;
-        AEFX_CLR_STRUCT(cur);
-        ERR(PF_CHECKOUT_PARAM(in_data, LITEGLOW_STRENGTH, in_data->current_time, in_data->time_step, in_data->time_scale, &cur));
-        s->strength = cur.u.fs_d.value;
-        AEFX_CLR_STRUCT(cur);
-        ERR(PF_CHECKOUT_PARAM(in_data, LITEGLOW_RADIUS, in_data->current_time, in_data->time_step, in_data->time_scale, &cur));
-        s->radius = cur.u.fs_d.value;
-        AEFX_CLR_STRUCT(cur);
-        ERR(PF_CHECKOUT_PARAM(in_data, LITEGLOW_THRESHOLD, in_data->current_time, in_data->time_step, in_data->time_scale, &cur));
-        s->threshold = cur.u.fs_d.value;
-        AEFX_CLR_STRUCT(cur);
-        ERR(PF_CHECKOUT_PARAM(in_data, LITEGLOW_QUALITY, in_data->current_time, in_data->time_step, in_data->time_scale, &cur));
-        s->quality = cur.u.pd.value;
-        pre->output->pre_render_data = s;
-    } else {
-        pre->output->pre_render_data = NULL;
-    }
+    UnionLRect(&in_result.result_rect, &pre->output->result_rect);
+    UnionLRect(&in_result.max_result_rect, &pre->output->max_result_rect);
+
+    // MFR対応: pre_render_data を使用せず、SmartRender内でパラメータをチェックアウトする
+    // SmartFX では AE がチェックアウトしたパラメータを自動的に解放するため安全
 
     return err;
 }
@@ -568,23 +551,49 @@ static PF_Err
 SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extraP)
 {
     PF_Err err = PF_Err_NONE;
+    PF_Err err2 = PF_Err_NONE;
     PF_EffectWorld* input_worldP = nullptr;
     PF_EffectWorld* output_worldP = nullptr;
+
+    // MFR対応: SmartRender内でパラメータを直接チェックアウト
+    // これによりスレッドセーフになる（各スレッドが独自のパラメータコピーを持つ）
+    PF_ParamDef strength_param, radius_param, threshold_param, quality_param;
+    AEFX_CLR_STRUCT(strength_param);
+    AEFX_CLR_STRUCT(radius_param);
+    AEFX_CLR_STRUCT(threshold_param);
+    AEFX_CLR_STRUCT(quality_param);
 
     ERR(extraP->cb->checkout_layer_pixels(in_data->effect_ref, LITEGLOW_INPUT, &input_worldP));
     ERR(extraP->cb->checkout_output(in_data->effect_ref, &output_worldP));
 
-    if (!err) {
-        LiteGlowSettings* s = reinterpret_cast<LiteGlowSettings*>(extraP->input->pre_render_data);
-        if (s) {
-            err = ProcessWorlds(in_data, out_data, *s, input_worldP, output_worldP);
-            free(s);
-        } else {
-            err = PF_Err_BAD_CALLBACK_PARAM;
-        }
+    // パラメータをチェックアウト
+    ERR(PF_CHECKOUT_PARAM(in_data, LITEGLOW_STRENGTH, in_data->current_time, 
+                          in_data->time_step, in_data->time_scale, &strength_param));
+    ERR(PF_CHECKOUT_PARAM(in_data, LITEGLOW_RADIUS, in_data->current_time, 
+                          in_data->time_step, in_data->time_scale, &radius_param));
+    ERR(PF_CHECKOUT_PARAM(in_data, LITEGLOW_THRESHOLD, in_data->current_time, 
+                          in_data->time_step, in_data->time_scale, &threshold_param));
+    ERR(PF_CHECKOUT_PARAM(in_data, LITEGLOW_QUALITY, in_data->current_time, 
+                          in_data->time_step, in_data->time_scale, &quality_param));
+
+    if (!err && input_worldP && output_worldP) {
+        LiteGlowSettings settings;
+        settings.strength = strength_param.u.fs_d.value;
+        settings.radius = radius_param.u.fs_d.value;
+        settings.threshold = threshold_param.u.fs_d.value;
+        settings.quality = quality_param.u.pd.value;
+        settings.mode = LITEGLOW_MODE_CPU;
+
+        err = ProcessWorlds(in_data, out_data, settings, input_worldP, output_worldP);
     }
 
-    extraP->cb->checkin_layer_pixels(in_data->effect_ref, LITEGLOW_INPUT);
+    // SmartFXではAEがパラメータを自動的にチェックインするため、明示的なチェックインは不要
+    // ただし、エラー処理のために明示的にチェックインする方が安全
+    ERR2(PF_CHECKIN_PARAM(in_data, &strength_param));
+    ERR2(PF_CHECKIN_PARAM(in_data, &radius_param));
+    ERR2(PF_CHECKIN_PARAM(in_data, &threshold_param));
+    ERR2(PF_CHECKIN_PARAM(in_data, &quality_param));
+
     return err;
 }
 
