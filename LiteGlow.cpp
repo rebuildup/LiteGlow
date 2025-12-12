@@ -35,11 +35,12 @@ GlobalSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
         PF_OutFlag_PIX_INDEPENDENT |
         PF_OutFlag_DEEP_COLOR_AWARE;
 
-    // SmartRender + Multi-Frame Rendering + 32-bit float support
+    // SmartRender + Multi-Frame Rendering + 32-bit float + GPU support
     out_data->out_flags2 = 
         PF_OutFlag2_SUPPORTS_SMART_RENDER |
         PF_OutFlag2_SUPPORTS_THREADED_RENDERING |
-        PF_OutFlag2_FLOAT_COLOR_AWARE;
+        PF_OutFlag2_FLOAT_COLOR_AWARE |
+        PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
 
     return PF_Err_NONE;
 }
@@ -545,6 +546,27 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data,
 }
 
 // =============================================================================
+// GPU Device Setup/Setdown
+// =============================================================================
+
+static PF_Err
+GPUDeviceSetup(PF_InData* in_dataP, PF_OutData* out_dataP, PF_GPUDeviceSetupExtra* extraP)
+{
+    PF_Err err = PF_Err_NONE;
+    
+    // Signal that GPU rendering is supported (will fall back to CPU)
+    out_dataP->out_flags2 = PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
+    
+    return err;
+}
+
+static PF_Err
+GPUDeviceSetdown(PF_InData* in_dataP, PF_OutData* out_dataP, PF_GPUDeviceSetdownExtra* extraP)
+{
+    return PF_Err_NONE;
+}
+
+// =============================================================================
 // Smart Render Handlers
 // =============================================================================
 
@@ -554,6 +576,9 @@ SmartPreRender(PF_InData* in_data, PF_OutData* out_data, PF_PreRenderExtra* pre)
     PF_Err err = PF_Err_NONE;
     PF_RenderRequest req = pre->input->output_request;
     PF_CheckoutResult in_result;
+
+    // Enable GPU rendering possibility
+    pre->output->flags |= PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
 
     ERR(pre->cb->checkout_layer(
         in_data->effect_ref,
@@ -681,6 +706,16 @@ EffectMain(
             err = SmartPreRender(in_data, out_data, (PF_PreRenderExtra*)extra);
             break;
         case PF_Cmd_SMART_RENDER:
+            err = SmartRender(in_data, out_data, (PF_SmartRenderExtra*)extra);
+            break;
+        case PF_Cmd_GPU_DEVICE_SETUP:
+            err = GPUDeviceSetup(in_data, out_data, (PF_GPUDeviceSetupExtra*)extra);
+            break;
+        case PF_Cmd_GPU_DEVICE_SETDOWN:
+            err = GPUDeviceSetdown(in_data, out_data, (PF_GPUDeviceSetdownExtra*)extra);
+            break;
+        case PF_Cmd_SMART_RENDER_GPU:
+            // GPU render falls back to CPU implementation
             err = SmartRender(in_data, out_data, (PF_SmartRenderExtra*)extra);
             break;
         default:
