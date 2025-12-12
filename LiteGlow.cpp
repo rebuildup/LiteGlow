@@ -623,6 +623,10 @@ GPUDeviceSetup(PF_InData* in_dataP, PF_OutData* out_dataP, PF_GPUDeviceSetupExtr
 {
     PF_Err err = PF_Err_NONE;
 
+    // This command is per-device/per-framework. Start with no GPU support,
+    // then advertise support only for frameworks we actually implement.
+    out_dataP->out_flags2 = 0;
+
     PF_GPUDeviceInfo device_info;
     AEFX_CLR_STRUCT(device_info);
 
@@ -672,7 +676,9 @@ GPUDeviceSetup(PF_InData* in_dataP, PF_OutData* out_dataP, PF_GPUDeviceSetupExtr
         DX_ERR(dx_gpu_data->mContext->LoadShader(csoPath.c_str(), sigPath.c_str(), dx_gpu_data->mBlendShader));
 
         extraP->output->gpu_data = gpu_dataH;
-        out_dataP->out_flags2 = PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
+        out_dataP->out_flags2 =
+            PF_OutFlag2_SUPPORTS_GPU_RENDER_F32 |
+            PF_OutFlag2_SUPPORTS_DIRECTX_RENDERING;
     }
 #endif
 
