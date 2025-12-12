@@ -14,9 +14,25 @@ cbuffer BlendParams : register(b0)
     int mFactor;
 };
 
-StructuredBuffer<float4> inSrc : register(t0);
-StructuredBuffer<float4> inGlow : register(t1);
-RWStructuredBuffer<float4> outDst : register(u0);
+ByteAddressBuffer inSrc : register(t0);
+ByteAddressBuffer inGlow : register(t1);
+RWByteAddressBuffer outDst : register(u0);
+
+static uint ByteOffset(uint pitch, uint x, uint y)
+{
+    return ((y * pitch) + x) * 16u;
+}
+
+static float4 LoadF4(ByteAddressBuffer b, uint byteOffset)
+{
+    uint4 u = b.Load4(byteOffset);
+    return asfloat(u);
+}
+
+static void StoreF4(RWByteAddressBuffer b, uint byteOffset, float4 v)
+{
+    b.Store4(byteOffset, asuint(v));
+}
 
 [numthreads(16, 16, 1)]
 [RootSignature(LITEGLOW_RS)]
@@ -29,8 +45,7 @@ void main(uint3 dtid : SV_DispatchThreadID)
     const uint x = dtid.x;
     const uint y = dtid.y;
 
-    const uint srcIdx = y * (uint)mSrcPitch + x;
-    float4 original = inSrc[srcIdx];
+    float4 original = LoadF4(inSrc, ByteOffset((uint)mSrcPitch, x, y));
 
     const uint factor = (uint)max(1, mFactor);
     const uint glowW = max(1u, mWidth / factor);
@@ -46,21 +61,19 @@ void main(uint3 dtid : SV_DispatchThreadID)
     const float fx = saturate(gx - (float)x0);
     const float fy = saturate(gy - (float)y0);
 
-    const uint row0 = (uint)y0 * (uint)mGlowPitch;
-    const uint row1 = (uint)y1 * (uint)mGlowPitch;
-    float4 g00 = inGlow[row0 + (uint)x0];
-    float4 g10 = inGlow[row0 + (uint)x1];
-    float4 g01 = inGlow[row1 + (uint)x0];
-    float4 g11 = inGlow[row1 + (uint)x1];
+    float4 g00 = LoadF4(inGlow, ByteOffset((uint)mGlowPitch, (uint)x0, (uint)y0));
+    float4 g10 = LoadF4(inGlow, ByteOffset((uint)mGlowPitch, (uint)x1, (uint)y0));
+    float4 g01 = LoadF4(inGlow, ByteOffset((uint)mGlowPitch, (uint)x0, (uint)y1));
+    float4 g11 = LoadF4(inGlow, ByteOffset((uint)mGlowPitch, (uint)x1, (uint)y1));
 
     float4 glow = lerp(lerp(g00, g10, fx), lerp(g01, g11, fx), fy);
 
-    // Stable strength mapping (prevents breakage at high Strength):
-    // g' = (g*s) / (1 + g*s)   in [0,1)
-    float3 g = glow.xyz * mStrength;
-    g = g / (1.0f + g);
+    // Stable HDR-to-display mapping:
+    // g' = 1 - exp(-g*s)  (film-like, avoids hard clipping at high Strength)
+    float3 g = max(0.0f, glow.xyz * mStrength);
+    g = 1.0f - exp(-g);
 
     // Screen: 1 - (1-a)(1-b)
     float3 rgb = 1.0f - (1.0f - original.xyz) * (1.0f - g);
-    outDst[y * (uint)mDstPitch + x] = float4(rgb, original.w);
+    StoreF4(outDst, ByteOffset((uint)mDstPitch, x, y), float4(rgb, original.w));
 }

@@ -14,8 +14,24 @@ cbuffer BrightPassParams : register(b0)
     int mFactor;
 };
 
-StructuredBuffer<float4> inSrc : register(t0);
-RWStructuredBuffer<float4> outDst : register(u0);
+ByteAddressBuffer inSrc : register(t0);
+RWByteAddressBuffer outDst : register(u0);
+
+static uint ByteOffset(uint pitch, uint x, uint y)
+{
+    return ((y * pitch) + x) * 16u;
+}
+
+static float4 LoadF4(ByteAddressBuffer b, uint byteOffset)
+{
+    uint4 u = b.Load4(byteOffset);
+    return asfloat(u);
+}
+
+static void StoreF4(RWByteAddressBuffer b, uint byteOffset, float4 v)
+{
+    b.Store4(byteOffset, asuint(v));
+}
 
 [numthreads(16, 16, 1)]
 [RootSignature(LITEGLOW_RS)]
@@ -26,6 +42,8 @@ void main(uint3 dtid : SV_DispatchThreadID)
     }
 
     const uint factor = (uint)max(1, mFactor);
+    const uint srcW = max(1u, mWidth * factor);
+    const uint srcH = max(1u, mHeight * factor);
     const uint srcX0 = dtid.x * factor;
     const uint srcY0 = dtid.y * factor;
 
@@ -35,13 +53,12 @@ void main(uint3 dtid : SV_DispatchThreadID)
     [loop]
     for (uint j = 0; j < factor; ++j)
     {
-        const uint sy = srcY0 + j;
+        const uint sy = min(srcY0 + j, srcH - 1u);
         [loop]
         for (uint i = 0; i < factor; ++i)
         {
-            const uint sx = srcX0 + i;
-            const uint idx = sy * (uint)mSrcPitch + sx;
-            pixel += inSrc[idx];
+            const uint sx = min(srcX0 + i, srcW - 1u);
+            pixel += LoadF4(inSrc, ByteOffset((uint)mSrcPitch, sx, sy));
             count++;
         }
     }
@@ -50,16 +67,26 @@ void main(uint3 dtid : SV_DispatchThreadID)
     // BGRA: x=B, y=G, z=R, w=A
     const float luma = pixel.z * 0.299f + pixel.y * 0.587f + pixel.x * 0.114f;
 
-    float4 result = float4(0.0f, 0.0f, 0.0f, pixel.w);
-    if (luma > mThreshold)
+    // Soft knee threshold for highlight rolloff.
+    const float knee = 0.1f;
+    const float t0 = mThreshold - knee;
+    const float t1 = mThreshold + knee;
+    float contrib = 0.0f;
+    if (luma > t0)
     {
-        const float diff = luma - mThreshold;
-        const float knee = diff / (1.0f + diff);
-        const float scale = knee * mStrength;
-        // Allow HDR glow (do not clamp here); the blend stage will apply tone mapping.
-        result.xyz = pixel.xyz * scale;
+        if (luma >= t1) {
+            contrib = luma - mThreshold;
+        } else {
+            const float tt = (luma - t0) / (t1 - t0);
+            contrib = (tt * tt * (3.0f - 2.0f * tt)) * max(0.0f, luma - mThreshold);
+        }
     }
 
-    const uint dstIdx = dtid.y * (uint)mDstPitch + dtid.x;
-    outDst[dstIdx] = result;
+    float4 result = float4(0.0f, 0.0f, 0.0f, pixel.w);
+    if (contrib > 0.0f)
+    {
+        result.xyz = pixel.xyz * (mStrength * contrib);
+    }
+
+    StoreF4(outDst, ByteOffset((uint)mDstPitch, dtid.x, dtid.y), result);
 }

@@ -14,8 +14,24 @@ cbuffer BlurParams : register(b0)
     int mPadding1;
 };
 
-StructuredBuffer<float4> inSrc : register(t0);
-RWStructuredBuffer<float4> outDst : register(u0);
+ByteAddressBuffer inSrc : register(t0);
+RWByteAddressBuffer outDst : register(u0);
+
+static uint ByteOffset(uint pitch, uint x, uint y)
+{
+    return ((y * pitch) + x) * 16u;
+}
+
+static float4 LoadF4(ByteAddressBuffer b, uint byteOffset)
+{
+    uint4 u = b.Load4(byteOffset);
+    return asfloat(u);
+}
+
+static void StoreF4(RWByteAddressBuffer b, uint byteOffset, float4 v)
+{
+    b.Store4(byteOffset, asuint(v));
+}
 
 [numthreads(16, 16, 1)]
 [RootSignature(LITEGLOW_RS)]
@@ -29,26 +45,24 @@ void main(uint3 dtid : SV_DispatchThreadID)
     const int y = (int)dtid.y;
     const int r = max(1, mRadius);
 
-    // Fast 5-tap separable blur with adjustable step to approximate a wider radius.
-    // Weights are binomial (1 4 6 4 1)/16.
-    const int step = max(1, r / 2);
-    const float w0 = 0.0625f;
-    const float w1 = 0.25f;
-    const float w2 = 0.375f;
+    // 9-tap Gaussian-ish blur with variable step (more stable on text edges).
+    const int step = max(1, r / 3);
+    const float w0 = 0.050f;
+    const float w1 = 0.090f;
+    const float w2 = 0.120f;
+    const float w3 = 0.150f;
+    const float w4 = 0.180f;
 
-    const int x0 = clamp(x - 2 * step, 0, (int)mWidth - 1);
-    const int x1 = clamp(x - step,     0, (int)mWidth - 1);
-    const int x2 = x;
-    const int x3 = clamp(x + step,     0, (int)mWidth - 1);
-    const int x4 = clamp(x + 2 * step, 0, (int)mWidth - 1);
+    float4 sum = 0.0f;
+    sum += LoadF4(inSrc, ByteOffset((uint)mSrcPitch, (uint)clamp(x - 4 * step, 0, (int)mWidth - 1), (uint)y)) * w0;
+    sum += LoadF4(inSrc, ByteOffset((uint)mSrcPitch, (uint)clamp(x - 3 * step, 0, (int)mWidth - 1), (uint)y)) * w1;
+    sum += LoadF4(inSrc, ByteOffset((uint)mSrcPitch, (uint)clamp(x - 2 * step, 0, (int)mWidth - 1), (uint)y)) * w2;
+    sum += LoadF4(inSrc, ByteOffset((uint)mSrcPitch, (uint)clamp(x - 1 * step, 0, (int)mWidth - 1), (uint)y)) * w3;
+    sum += LoadF4(inSrc, ByteOffset((uint)mSrcPitch, (uint)x, (uint)y)) * w4;
+    sum += LoadF4(inSrc, ByteOffset((uint)mSrcPitch, (uint)clamp(x + 1 * step, 0, (int)mWidth - 1), (uint)y)) * w3;
+    sum += LoadF4(inSrc, ByteOffset((uint)mSrcPitch, (uint)clamp(x + 2 * step, 0, (int)mWidth - 1), (uint)y)) * w2;
+    sum += LoadF4(inSrc, ByteOffset((uint)mSrcPitch, (uint)clamp(x + 3 * step, 0, (int)mWidth - 1), (uint)y)) * w1;
+    sum += LoadF4(inSrc, ByteOffset((uint)mSrcPitch, (uint)clamp(x + 4 * step, 0, (int)mWidth - 1), (uint)y)) * w0;
 
-    const uint rowBase = (uint)y * (uint)mSrcPitch;
-    float4 sum =
-        inSrc[rowBase + (uint)x0] * w0 +
-        inSrc[rowBase + (uint)x1] * w1 +
-        inSrc[rowBase + (uint)x2] * w2 +
-        inSrc[rowBase + (uint)x3] * w1 +
-        inSrc[rowBase + (uint)x4] * w0;
-
-    outDst[(uint)y * (uint)mDstPitch + (uint)x] = sum;
+    StoreF4(outDst, ByteOffset((uint)mDstPitch, (uint)x, (uint)y), sum);
 }
