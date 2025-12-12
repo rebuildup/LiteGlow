@@ -41,16 +41,6 @@
 #define KERNEL_XY
 #endif
 
-/*
- * Kernel declaration macro.
- * In the full SDK this expands argument sequences via Boost. For preprocessing
- * fallback we keep the kernel name visible so ParseHLSL can locate entrypoints.
- */
-#ifndef GF_KERNEL_FUNCTION
-#define GF_KERNEL_FUNCTION(name, buffers, values, threadpos) \
-    void name buffers values threadpos
-#endif
-
 /* Small helpers referenced by kernels; keep simple for preprocessing */
 #ifndef make_float4
 #define make_float4(x,y,z,w) float4(x,y,z,w)
