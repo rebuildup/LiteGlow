@@ -35,12 +35,11 @@ GlobalSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
         PF_OutFlag_PIX_INDEPENDENT |
         PF_OutFlag_DEEP_COLOR_AWARE;
 
-    // SmartRender + Multi-Frame Rendering + 32-bit float + GPU support
+    // SmartRender + Multi-Frame Rendering + 32-bit float
     out_data->out_flags2 = 
         PF_OutFlag2_SUPPORTS_SMART_RENDER |
         PF_OutFlag2_SUPPORTS_THREADED_RENDERING |
-        PF_OutFlag2_FLOAT_COLOR_AWARE |
-        PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
+        PF_OutFlag2_FLOAT_COLOR_AWARE;
 
     return PF_Err_NONE;
 }
@@ -546,53 +545,6 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data,
 }
 
 // =============================================================================
-// GPU Device Setup/Setdown
-// =============================================================================
-
-// Dummy GPU data structure to signal GPU support
-struct LiteGlowGPUData {
-    int dummy;
-};
-
-static PF_Err
-GPUDeviceSetup(PF_InData* in_dataP, PF_OutData* out_dataP, PF_GPUDeviceSetupExtra* extraP)
-{
-    PF_Err err = PF_Err_NONE;
-
-    // Get handle suite for memory allocation
-    AEFX_SuiteScoper<PF_HandleSuite1> handle_suite = AEFX_SuiteScoper<PF_HandleSuite1>(
-        in_dataP, kPFHandleSuite, kPFHandleSuiteVersion1, out_dataP);
-
-    // Allocate GPU data to signal we support GPU rendering
-    PF_Handle gpu_dataH = handle_suite->host_new_handle(sizeof(LiteGlowGPUData));
-    
-    if (gpu_dataH) {
-        LiteGlowGPUData* gpu_data = reinterpret_cast<LiteGlowGPUData*>(*gpu_dataH);
-        gpu_data->dummy = 1;
-        
-        extraP->output->gpu_data = gpu_dataH;
-        out_dataP->out_flags2 = PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
-    }
-    
-    return err;
-}
-
-static PF_Err
-GPUDeviceSetdown(PF_InData* in_dataP, PF_OutData* out_dataP, PF_GPUDeviceSetdownExtra* extraP)
-{
-    PF_Err err = PF_Err_NONE;
-    
-    if (extraP->input->gpu_data) {
-        AEFX_SuiteScoper<PF_HandleSuite1> handle_suite = AEFX_SuiteScoper<PF_HandleSuite1>(
-            in_dataP, kPFHandleSuite, kPFHandleSuiteVersion1, out_dataP);
-        
-        handle_suite->host_dispose_handle((PF_Handle)extraP->input->gpu_data);
-    }
-    
-    return err;
-}
-
-// =============================================================================
 // Smart Render Handlers
 // =============================================================================
 
@@ -602,9 +554,6 @@ SmartPreRender(PF_InData* in_data, PF_OutData* out_data, PF_PreRenderExtra* pre)
     PF_Err err = PF_Err_NONE;
     PF_RenderRequest req = pre->input->output_request;
     PF_CheckoutResult in_result;
-
-    // Enable GPU rendering possibility
-    pre->output->flags |= PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
 
     ERR(pre->cb->checkout_layer(
         in_data->effect_ref,
@@ -732,16 +681,6 @@ EffectMain(
             err = SmartPreRender(in_data, out_data, (PF_PreRenderExtra*)extra);
             break;
         case PF_Cmd_SMART_RENDER:
-            err = SmartRender(in_data, out_data, (PF_SmartRenderExtra*)extra);
-            break;
-        case PF_Cmd_GPU_DEVICE_SETUP:
-            err = GPUDeviceSetup(in_data, out_data, (PF_GPUDeviceSetupExtra*)extra);
-            break;
-        case PF_Cmd_GPU_DEVICE_SETDOWN:
-            err = GPUDeviceSetdown(in_data, out_data, (PF_GPUDeviceSetdownExtra*)extra);
-            break;
-        case PF_Cmd_SMART_RENDER_GPU:
-            // GPU render falls back to CPU implementation
             err = SmartRender(in_data, out_data, (PF_SmartRenderExtra*)extra);
             break;
         default:
