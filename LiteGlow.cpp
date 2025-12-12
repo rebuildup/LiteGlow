@@ -549,13 +549,30 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data,
 // GPU Device Setup/Setdown
 // =============================================================================
 
+// Dummy GPU data structure to signal GPU support
+struct LiteGlowGPUData {
+    int dummy;
+};
+
 static PF_Err
 GPUDeviceSetup(PF_InData* in_dataP, PF_OutData* out_dataP, PF_GPUDeviceSetupExtra* extraP)
 {
     PF_Err err = PF_Err_NONE;
+
+    // Get handle suite for memory allocation
+    AEFX_SuiteScoper<PF_HandleSuite1> handle_suite = AEFX_SuiteScoper<PF_HandleSuite1>(
+        in_dataP, kPFHandleSuite, kPFHandleSuiteVersion1, out_dataP);
+
+    // Allocate GPU data to signal we support GPU rendering
+    PF_Handle gpu_dataH = handle_suite->host_new_handle(sizeof(LiteGlowGPUData));
     
-    // Signal that GPU rendering is supported (will fall back to CPU)
-    out_dataP->out_flags2 = PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
+    if (gpu_dataH) {
+        LiteGlowGPUData* gpu_data = reinterpret_cast<LiteGlowGPUData*>(*gpu_dataH);
+        gpu_data->dummy = 1;
+        
+        extraP->output->gpu_data = gpu_dataH;
+        out_dataP->out_flags2 = PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
+    }
     
     return err;
 }
@@ -563,7 +580,16 @@ GPUDeviceSetup(PF_InData* in_dataP, PF_OutData* out_dataP, PF_GPUDeviceSetupExtr
 static PF_Err
 GPUDeviceSetdown(PF_InData* in_dataP, PF_OutData* out_dataP, PF_GPUDeviceSetdownExtra* extraP)
 {
-    return PF_Err_NONE;
+    PF_Err err = PF_Err_NONE;
+    
+    if (extraP->input->gpu_data) {
+        AEFX_SuiteScoper<PF_HandleSuite1> handle_suite = AEFX_SuiteScoper<PF_HandleSuite1>(
+            in_dataP, kPFHandleSuite, kPFHandleSuiteVersion1, out_dataP);
+        
+        handle_suite->host_dispose_handle((PF_Handle)extraP->input->gpu_data);
+    }
+    
+    return err;
 }
 
 // =============================================================================
