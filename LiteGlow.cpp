@@ -3,31 +3,13 @@
 #include "AEFX_SuiteHelper.h"
 #include "AE_EffectPixelFormat.h"
 
-#ifdef AE_OS_WIN
-#include "DirectXUtils.h"
-#endif
-
 #include <math.h>
 #include <cstdlib>
 #include <algorithm>
 
 // =============================================================================
-// LiteGlow - High-Performance Glow Effect with GPU Acceleration
-// =============================================================================
-
-// GPU Data Structures
-#ifdef AE_OS_WIN
-#define HAS_HLSL 1
-struct DirectXGPUData {
-    DXContextPtr mContext;
-    ShaderObjectPtr mGlowShader;
-};
-#else
-#define HAS_HLSL 0
-#endif
-
-// =============================================================================
-// Helper Functions
+// LiteGlow - High-Performance Glow Effect
+// Multi-Frame Rendering + 32-bit Float Support
 // =============================================================================
 
 static PF_Err
@@ -58,11 +40,6 @@ GlobalSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
         PF_OutFlag2_SUPPORTS_SMART_RENDER |
         PF_OutFlag2_SUPPORTS_THREADED_RENDERING |
         PF_OutFlag2_FLOAT_COLOR_AWARE;
-
-#if HAS_HLSL
-    // Enable GPU rendering on Windows
-    out_data->out_flags2 |= PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
-#endif
 
     return PF_Err_NONE;
 }
@@ -112,10 +89,9 @@ ParamsSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
 }
 
 // =============================================================================
-// Optimized Pixel Processing Functions
+// Optimized CPU Pixel Processing
 // =============================================================================
 
-// Luminance calculation (Rec. 709)
 inline float Luma8(const PF_Pixel8* p) {
     return (0.2126f * p->red + 0.7152f * p->green + 0.0722f * p->blue) / 255.0f;
 }
@@ -128,19 +104,7 @@ inline float LumaF(const PF_PixelFloat* p) {
     return 0.2126f * p->red + 0.7152f * p->green + 0.0722f * p->blue;
 }
 
-// =============================================================================
-// Bright Pass with Soft Knee (more natural threshold)
-// =============================================================================
-
-typedef struct {
-    float threshold;    // 0..1
-    float knee;         // softness of threshold transition
-    float intensity;    // brightness multiplier
-    PF_EffectWorld* src;
-    int factor;
-} BrightPassInfo;
-
-// Soft knee function for natural threshold transition
+// Soft knee for natural threshold transition
 inline float SoftKnee(float x, float threshold, float knee) {
     float knee_start = threshold - knee;
     float knee_end = threshold + knee;
@@ -148,11 +112,26 @@ inline float SoftKnee(float x, float threshold, float knee) {
     if (x <= knee_start) return 0.0f;
     if (x >= knee_end) return x - threshold;
     
-    // Smooth cubic interpolation in knee region
     float t = (x - knee_start) / (knee_end - knee_start);
-    float k = t * t * (3.0f - 2.0f * t);
-    return k * (x - threshold);
+    return t * t * (3.0f - 2.0f * t) * (x - threshold);
 }
+
+// Screen blend
+inline float ScreenBlend(float a, float b) {
+    return 1.0f - (1.0f - a) * (1.0f - b);
+}
+
+// =============================================================================
+// Bright Pass Functions
+// =============================================================================
+
+typedef struct {
+    float threshold;
+    float knee;
+    float intensity;
+    PF_EffectWorld* src;
+    int factor;
+} BrightPassInfo;
 
 static PF_Err BrightPass8(void* refcon, A_long x, A_long y, PF_Pixel8* inP, PF_Pixel8* outP) {
     BrightPassInfo* bp = reinterpret_cast<BrightPassInfo*>(refcon);
@@ -230,7 +209,7 @@ static PF_Err BrightPassF(void* refcon, A_long x, A_long y, PF_PixelFloat* inP, 
 }
 
 // =============================================================================
-// Optimized Box Blur (for Gaussian approximation via 3-pass)
+// Blur Functions (Optimized Box Blur for Gaussian Approximation)
 // =============================================================================
 
 typedef struct {
@@ -238,7 +217,6 @@ typedef struct {
     int radius;
 } BlurInfo;
 
-// Horizontal blur
 static PF_Err BlurH8(void* refcon, A_long x, A_long y, PF_Pixel8* inP, PF_Pixel8* outP) {
     BlurInfo* bi = reinterpret_cast<BlurInfo*>(refcon);
     PF_EffectWorld* w = bi->src;
@@ -302,7 +280,6 @@ static PF_Err BlurHF(void* refcon, A_long x, A_long y, PF_PixelFloat* inP, PF_Pi
     return PF_Err_NONE;
 }
 
-// Vertical blur
 static PF_Err BlurV8(void* refcon, A_long x, A_long y, PF_Pixel8* inP, PF_Pixel8* outP) {
     BlurInfo* bi = reinterpret_cast<BlurInfo*>(refcon);
     PF_EffectWorld* w = bi->src;
@@ -364,7 +341,7 @@ static PF_Err BlurVF(void* refcon, A_long x, A_long y, PF_PixelFloat* inP, PF_Pi
 }
 
 // =============================================================================
-// Screen Blend with Bilinear Interpolation
+// Screen Blend Functions
 // =============================================================================
 
 typedef struct {
@@ -373,55 +350,24 @@ typedef struct {
     int factor;
 } BlendInfo;
 
-// Bilinear sample helper
-template<typename T>
-inline void BilinearSample(PF_EffectWorld* w, float fx, float fy, float* r, float* g, float* b, float maxVal) {
-    int x0 = (int)fx;
-    int y0 = (int)fy;
-    int x1 = MIN(x0 + 1, w->width - 1);
-    int y1 = MIN(y0 + 1, w->height - 1);
-    float dx = fx - x0;
-    float dy = fy - y0;
-    
-    T* p00 = (T*)((char*)w->data + y0 * w->rowbytes) + x0;
-    T* p10 = (T*)((char*)w->data + y0 * w->rowbytes) + x1;
-    T* p01 = (T*)((char*)w->data + y1 * w->rowbytes) + x0;
-    T* p11 = (T*)((char*)w->data + y1 * w->rowbytes) + x1;
-    
-    float w00 = (1.0f - dx) * (1.0f - dy);
-    float w10 = dx * (1.0f - dy);
-    float w01 = (1.0f - dx) * dy;
-    float w11 = dx * dy;
-    
-    *r = (p00->red * w00 + p10->red * w10 + p01->red * w01 + p11->red * w11) / maxVal;
-    *g = (p00->green * w00 + p10->green * w10 + p01->green * w01 + p11->green * w11) / maxVal;
-    *b = (p00->blue * w00 + p10->blue * w10 + p01->blue * w01 + p11->blue * w11) / maxVal;
-}
-
-// Screen blend: 1 - (1-a)(1-b)
-inline float ScreenBlend(float a, float b) {
-    return 1.0f - (1.0f - a) * (1.0f - b);
-}
-
 static PF_Err BlendScreen8(void* refcon, A_long x, A_long y, PF_Pixel8* inP, PF_Pixel8* outP) {
     BlendInfo* bi = reinterpret_cast<BlendInfo*>(refcon);
     
-    float fx = (float)x / bi->factor;
-    float fy = (float)y / bi->factor;
-    fx = MIN(fx, (float)(bi->glow->width - 1));
-    fy = MIN(fy, (float)(bi->glow->height - 1));
-    
-    float gr, gg, gb;
-    BilinearSample<PF_Pixel8>(bi->glow, fx, fy, &gr, &gg, &gb, 255.0f);
+    int gx = MIN(bi->glow->width - 1, x / bi->factor);
+    int gy = MIN(bi->glow->height - 1, y / bi->factor);
+    PF_Pixel8* g = (PF_Pixel8*)((char*)bi->glow->data + gy * bi->glow->rowbytes) + gx;
     
     float s = bi->strength;
     float ir = inP->red / 255.0f;
     float ig = inP->green / 255.0f;
     float ib = inP->blue / 255.0f;
+    float gr = g->red / 255.0f * s;
+    float gg = g->green / 255.0f * s;
+    float gb = g->blue / 255.0f * s;
     
-    outP->red   = (A_u_char)(ScreenBlend(ir, gr * s) * 255.0f);
-    outP->green = (A_u_char)(ScreenBlend(ig, gg * s) * 255.0f);
-    outP->blue  = (A_u_char)(ScreenBlend(ib, gb * s) * 255.0f);
+    outP->red   = (A_u_char)(ScreenBlend(ir, gr) * 255.0f);
+    outP->green = (A_u_char)(ScreenBlend(ig, gg) * 255.0f);
+    outP->blue  = (A_u_char)(ScreenBlend(ib, gb) * 255.0f);
     outP->alpha = inP->alpha;
     return PF_Err_NONE;
 }
@@ -429,22 +375,21 @@ static PF_Err BlendScreen8(void* refcon, A_long x, A_long y, PF_Pixel8* inP, PF_
 static PF_Err BlendScreen16(void* refcon, A_long x, A_long y, PF_Pixel16* inP, PF_Pixel16* outP) {
     BlendInfo* bi = reinterpret_cast<BlendInfo*>(refcon);
     
-    float fx = (float)x / bi->factor;
-    float fy = (float)y / bi->factor;
-    fx = MIN(fx, (float)(bi->glow->width - 1));
-    fy = MIN(fy, (float)(bi->glow->height - 1));
-    
-    float gr, gg, gb;
-    BilinearSample<PF_Pixel16>(bi->glow, fx, fy, &gr, &gg, &gb, 32768.0f);
+    int gx = MIN(bi->glow->width - 1, x / bi->factor);
+    int gy = MIN(bi->glow->height - 1, y / bi->factor);
+    PF_Pixel16* g = (PF_Pixel16*)((char*)bi->glow->data + gy * bi->glow->rowbytes) + gx;
     
     float s = bi->strength;
     float ir = inP->red / 32768.0f;
     float ig = inP->green / 32768.0f;
     float ib = inP->blue / 32768.0f;
+    float gr = g->red / 32768.0f * s;
+    float gg = g->green / 32768.0f * s;
+    float gb = g->blue / 32768.0f * s;
     
-    outP->red   = (A_u_short)(ScreenBlend(ir, gr * s) * 32768.0f);
-    outP->green = (A_u_short)(ScreenBlend(ig, gg * s) * 32768.0f);
-    outP->blue  = (A_u_short)(ScreenBlend(ib, gb * s) * 32768.0f);
+    outP->red   = (A_u_short)(ScreenBlend(ir, gr) * 32768.0f);
+    outP->green = (A_u_short)(ScreenBlend(ig, gg) * 32768.0f);
+    outP->blue  = (A_u_short)(ScreenBlend(ib, gb) * 32768.0f);
     outP->alpha = inP->alpha;
     return PF_Err_NONE;
 }
@@ -452,14 +397,8 @@ static PF_Err BlendScreen16(void* refcon, A_long x, A_long y, PF_Pixel16* inP, P
 static PF_Err BlendScreenF(void* refcon, A_long x, A_long y, PF_PixelFloat* inP, PF_PixelFloat* outP) {
     BlendInfo* bi = reinterpret_cast<BlendInfo*>(refcon);
     
-    float fx = (float)x / bi->factor;
-    float fy = (float)y / bi->factor;
-    fx = MIN(fx, (float)(bi->glow->width - 1));
-    fy = MIN(fy, (float)(bi->glow->height - 1));
-    
-    // Direct float sample
-    int gx = (int)fx;
-    int gy = (int)fy;
+    int gx = MIN(bi->glow->width - 1, x / bi->factor);
+    int gy = MIN(bi->glow->height - 1, y / bi->factor);
     PF_PixelFloat* g = (PF_PixelFloat*)((char*)bi->glow->data + gy * bi->glow->rowbytes) + gx;
     
     float s = bi->strength;
@@ -471,53 +410,46 @@ static PF_Err BlendScreenF(void* refcon, A_long x, A_long y, PF_PixelFloat* inP,
 }
 
 // =============================================================================
-// Main Render Function (CPU)
+// Main Render Function
 // =============================================================================
 
 typedef struct {
     float strength;
     float radius;
     float threshold;
-    int   quality;
+    int quality;
 } LiteGlowSettings;
 
 static PF_Err
-ProcessWorldsCPU(PF_InData* in_data, PF_OutData* out_data, 
-                 const LiteGlowSettings& settings, 
-                 PF_EffectWorld* inputW, PF_EffectWorld* outputW)
+ProcessWorlds(PF_InData* in_data, PF_OutData* out_data,
+              const LiteGlowSettings* settings,
+              PF_EffectWorld* inputW, PF_EffectWorld* outputW)
 {
     PF_Err err = PF_Err_NONE;
     AEGP_SuiteHandler suites(in_data->pica_basicP);
 
-    // Normalize parameters
-    float strength_norm = settings.strength / 2000.0f;
-    float threshold_norm = settings.threshold / 255.0f;
-    int base_radius = (int)settings.radius;
-    int quality = settings.quality;
+    float strength_norm = settings->strength / 2000.0f;
+    float threshold_norm = settings->threshold / 255.0f;
+    int base_radius = (int)settings->radius;
+    int quality = settings->quality;
 
-    // Early out for zero strength
     if (strength_norm <= 0.0001f || base_radius <= 0) {
         return PF_COPY(inputW, outputW, NULL, NULL);
     }
 
-    // Get pixel format
     AEFX_SuiteHelperT<PF_WorldSuite2> worldSuite(in_data, out_data, kPFWorldSuite, kPFWorldSuiteVersion2);
     PF_PixelFormat pixfmt = PF_PixelFormat_INVALID;
     ERR(worldSuite->PF_GetPixelFormat(inputW, &pixfmt));
 
-    // Downsample factor based on quality
-    // Low=4x, Medium=2x, High=1x
+    // Downsample for performance: Low=4x, Medium=2x, High=1x
     int ds = (quality == QUALITY_HIGH) ? 1 : (quality == QUALITY_MEDIUM ? 2 : 4);
     int dsW = MAX(1, outputW->width / ds);
     int dsH = MAX(1, outputW->height / ds);
     int ds_radius = MAX(1, base_radius / ds);
-
-    // Adjust radius for quality
     if (quality == QUALITY_HIGH) ds_radius += 2;
     ds_radius = MIN(ds_radius, 24);
 
-    // Allocate temporary worlds
-    // We need 4 buffers for 3-pass Gaussian approximation: bright, blur1, blur2, blur3
+    // Allocate temporary worlds for 4-pass blur
     PF_EffectWorld brightW, blur1, blur2;
     ERR(worldSuite->PF_NewWorld(in_data->effect_ref, dsW, dsH, TRUE, pixfmt, &brightW));
     ERR(worldSuite->PF_NewWorld(in_data->effect_ref, dsW, dsH, TRUE, pixfmt, &blur1));
@@ -530,118 +462,87 @@ ProcessWorldsCPU(PF_InData* in_data, PF_OutData* out_data,
         return err;
     }
 
-    // 1) Bright pass with soft knee
+    // 1) Bright pass with soft knee for natural threshold
     if (!err) {
-        float knee = 0.1f; // Soft transition zone
+        float knee = 0.1f;
         BrightPassInfo bp{ threshold_norm, knee, 1.5f, inputW, ds };
         A_long lines = brightW.height;
         
-        if (pixfmt == PF_PixelFormat_ARGB32) {
+        if (pixfmt == PF_PixelFormat_ARGB32)
             ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines, &brightW, NULL, &bp, BrightPass8, &brightW));
-        } else if (pixfmt == PF_PixelFormat_ARGB64) {
+        else if (pixfmt == PF_PixelFormat_ARGB64)
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines, &brightW, NULL, &bp, BrightPass16, &brightW));
-        } else if (pixfmt == PF_PixelFormat_ARGB128) {
+        else if (pixfmt == PF_PixelFormat_ARGB128)
             ERR(suites.IterateFloatSuite2()->iterate(in_data, 0, lines, &brightW, NULL, &bp, BrightPassF, &brightW));
-        }
     }
 
-    // 2) 3-pass box blur for Gaussian approximation (more natural glow)
-    // Pass 1: H blur
+    // 2) 4-pass blur for smooth Gaussian approximation
+    // Pass 1: Horizontal
     if (!err) {
         BlurInfo bi{ &brightW, ds_radius };
         A_long lines = brightW.height;
-        if (pixfmt == PF_PixelFormat_ARGB32) {
+        if (pixfmt == PF_PixelFormat_ARGB32)
             ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines, &brightW, NULL, &bi, BlurH8, &blur1));
-        } else if (pixfmt == PF_PixelFormat_ARGB64) {
+        else if (pixfmt == PF_PixelFormat_ARGB64)
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines, &brightW, NULL, &bi, BlurH16, &blur1));
-        } else if (pixfmt == PF_PixelFormat_ARGB128) {
+        else if (pixfmt == PF_PixelFormat_ARGB128)
             ERR(suites.IterateFloatSuite2()->iterate(in_data, 0, lines, &brightW, NULL, &bi, BlurHF, &blur1));
-        }
     }
 
-    // Pass 2: V blur
+    // Pass 2: Vertical
     if (!err) {
         BlurInfo bi{ &blur1, ds_radius };
         A_long lines = blur1.height;
-        if (pixfmt == PF_PixelFormat_ARGB32) {
+        if (pixfmt == PF_PixelFormat_ARGB32)
             ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines, &blur1, NULL, &bi, BlurV8, &blur2));
-        } else if (pixfmt == PF_PixelFormat_ARGB64) {
+        else if (pixfmt == PF_PixelFormat_ARGB64)
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines, &blur1, NULL, &bi, BlurV16, &blur2));
-        } else if (pixfmt == PF_PixelFormat_ARGB128) {
+        else if (pixfmt == PF_PixelFormat_ARGB128)
             ERR(suites.IterateFloatSuite2()->iterate(in_data, 0, lines, &blur1, NULL, &bi, BlurVF, &blur2));
-        }
     }
 
-    // Pass 3: H blur (for smoother Gaussian)
+    // Pass 3: Horizontal
     if (!err) {
         BlurInfo bi{ &blur2, ds_radius };
         A_long lines = blur2.height;
-        if (pixfmt == PF_PixelFormat_ARGB32) {
+        if (pixfmt == PF_PixelFormat_ARGB32)
             ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines, &blur2, NULL, &bi, BlurH8, &blur1));
-        } else if (pixfmt == PF_PixelFormat_ARGB64) {
+        else if (pixfmt == PF_PixelFormat_ARGB64)
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines, &blur2, NULL, &bi, BlurH16, &blur1));
-        } else if (pixfmt == PF_PixelFormat_ARGB128) {
+        else if (pixfmt == PF_PixelFormat_ARGB128)
             ERR(suites.IterateFloatSuite2()->iterate(in_data, 0, lines, &blur2, NULL, &bi, BlurHF, &blur1));
-        }
     }
 
-    // Pass 4: V blur (final blur pass)
+    // Pass 4: Vertical
     if (!err) {
         BlurInfo bi{ &blur1, ds_radius };
         A_long lines = blur1.height;
-        if (pixfmt == PF_PixelFormat_ARGB32) {
+        if (pixfmt == PF_PixelFormat_ARGB32)
             ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines, &blur1, NULL, &bi, BlurV8, &blur2));
-        } else if (pixfmt == PF_PixelFormat_ARGB64) {
+        else if (pixfmt == PF_PixelFormat_ARGB64)
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines, &blur1, NULL, &bi, BlurV16, &blur2));
-        } else if (pixfmt == PF_PixelFormat_ARGB128) {
+        else if (pixfmt == PF_PixelFormat_ARGB128)
             ERR(suites.IterateFloatSuite2()->iterate(in_data, 0, lines, &blur1, NULL, &bi, BlurVF, &blur2));
-        }
     }
 
-    // 3) Screen blend with bilinear upscale
+    // 3) Screen blend
     if (!err) {
         BlendInfo bl{ &blur2, strength_norm * 2.0f, ds };
         A_long lines = outputW->height;
-        if (pixfmt == PF_PixelFormat_ARGB32) {
+        if (pixfmt == PF_PixelFormat_ARGB32)
             ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines, inputW, NULL, &bl, BlendScreen8, outputW));
-        } else if (pixfmt == PF_PixelFormat_ARGB64) {
+        else if (pixfmt == PF_PixelFormat_ARGB64)
             ERR(suites.Iterate16Suite2()->iterate(in_data, 0, lines, inputW, NULL, &bl, BlendScreen16, outputW));
-        } else if (pixfmt == PF_PixelFormat_ARGB128) {
+        else if (pixfmt == PF_PixelFormat_ARGB128)
             ERR(suites.IterateFloatSuite2()->iterate(in_data, 0, lines, inputW, NULL, &bl, BlendScreenF, outputW));
-        }
     }
 
-    // Dispose temporary worlds
     worldSuite->PF_DisposeWorld(in_data->effect_ref, &brightW);
     worldSuite->PF_DisposeWorld(in_data->effect_ref, &blur1);
     worldSuite->PF_DisposeWorld(in_data->effect_ref, &blur2);
 
     return err;
 }
-
-// =============================================================================
-// GPU Setup/Setdown (DirectX)
-// =============================================================================
-
-#if HAS_HLSL
-static PF_Err
-GPUDeviceSetup(PF_InData* in_dataP, PF_OutData* out_dataP, PF_GPUDeviceSetupExtra* extraP)
-{
-    PF_Err err = PF_Err_NONE;
-
-    // For now, indicate we support GPU rendering but fall back to CPU
-    // Full GPU implementation would require HLSL shaders
-    out_dataP->out_flags2 = PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
-    
-    return err;
-}
-
-static PF_Err
-GPUDeviceSetdown(PF_InData* in_dataP, PF_OutData* out_dataP, PF_GPUDeviceSetdownExtra* extraP)
-{
-    return PF_Err_NONE;
-}
-#endif
 
 // =============================================================================
 // Smart Render Handlers
@@ -653,11 +554,6 @@ SmartPreRender(PF_InData* in_data, PF_OutData* out_data, PF_PreRenderExtra* pre)
     PF_Err err = PF_Err_NONE;
     PF_RenderRequest req = pre->input->output_request;
     PF_CheckoutResult in_result;
-
-#if HAS_HLSL
-    // Enable GPU rendering possibility
-    pre->output->flags |= PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
-#endif
 
     ERR(pre->cb->checkout_layer(
         in_data->effect_ref,
@@ -676,14 +572,13 @@ SmartPreRender(PF_InData* in_data, PF_OutData* out_data, PF_PreRenderExtra* pre)
 }
 
 static PF_Err
-SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extraP, bool isGPU)
+SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extraP)
 {
     PF_Err err = PF_Err_NONE;
     PF_Err err2 = PF_Err_NONE;
     PF_EffectWorld* input_worldP = nullptr;
     PF_EffectWorld* output_worldP = nullptr;
 
-    // Checkout parameters
     PF_ParamDef strength_param, radius_param, threshold_param, quality_param;
     AEFX_CLR_STRUCT(strength_param);
     AEFX_CLR_STRUCT(radius_param);
@@ -709,8 +604,7 @@ SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extra
         settings.threshold = threshold_param.u.fs_d.value;
         settings.quality = quality_param.u.pd.value;
 
-        // Always use CPU path for now (GPU path would require HLSL shaders)
-        err = ProcessWorldsCPU(in_data, out_data, settings, input_worldP, output_worldP);
+        err = ProcessWorlds(in_data, out_data, &settings, input_worldP, output_worldP);
     }
 
     ERR2(PF_CHECKIN_PARAM(in_data, &strength_param));
@@ -731,7 +625,7 @@ Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_Layer
     s.radius = params[LITEGLOW_RADIUS]->u.fs_d.value;
     s.threshold = params[LITEGLOW_THRESHOLD]->u.fs_d.value;
     s.quality = params[LITEGLOW_QUALITY]->u.pd.value;
-    return ProcessWorldsCPU(in_data, out_data, s, inputW, outputW);
+    return ProcessWorlds(in_data, out_data, &s, inputW, outputW);
 }
 
 // =============================================================================
@@ -768,6 +662,7 @@ EffectMain(
     void* extra)
 {
     PF_Err err = PF_Err_NONE;
+    
     try {
         switch (cmd) {
         case PF_Cmd_ABOUT:
@@ -786,23 +681,13 @@ EffectMain(
             err = SmartPreRender(in_data, out_data, (PF_PreRenderExtra*)extra);
             break;
         case PF_Cmd_SMART_RENDER:
-            err = SmartRender(in_data, out_data, (PF_SmartRenderExtra*)extra, false);
+            err = SmartRender(in_data, out_data, (PF_SmartRenderExtra*)extra);
             break;
-#if HAS_HLSL
-        case PF_Cmd_GPU_DEVICE_SETUP:
-            err = GPUDeviceSetup(in_data, out_data, (PF_GPUDeviceSetupExtra*)extra);
-            break;
-        case PF_Cmd_GPU_DEVICE_SETDOWN:
-            err = GPUDeviceSetdown(in_data, out_data, (PF_GPUDeviceSetdownExtra*)extra);
-            break;
-        case PF_Cmd_SMART_RENDER_GPU:
-            err = SmartRender(in_data, out_data, (PF_SmartRenderExtra*)extra, true);
-            break;
-#endif
         default:
             break;
         }
     }
     catch (PF_Err& thrown) { err = thrown; }
+    
     return err;
 }
