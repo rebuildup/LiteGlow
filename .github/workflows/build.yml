@@ -73,36 +73,93 @@ jobs:
         with:
           arch: x64
 
-      - name: Locate DXC (Windows)
+      - name: Locate or Download DXC (Windows)
         if: matrix.platform == 'win'
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          
+          function Set-DxcBasePath([string]$dxcExePath) {
+            $dxcBase = Split-Path (Split-Path $dxcExePath -Parent) -Parent
+            Write-Host "Found dxc: $dxcExePath"
+            Write-Host "Setting DXC_SDK_BASE_PATH=$dxcBase"
+            "DXC_SDK_BASE_PATH=$dxcBase" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          
+          # 1) Already on PATH?
+          $cmd = Get-Command dxc.exe -ErrorAction SilentlyContinue
+          if ($cmd) {
+            Set-DxcBasePath $cmd.Source
+            exit 0
+          }
+          
+          # 2) Windows Kits locations (best-effort)
           $roots = @(
             "C:\Program Files (x86)\Windows Kits\10\bin",
             "C:\Program Files\Windows Kits\10\bin"
           )
           
-          $dxc = $null
           foreach ($root in $roots) {
             if (-not (Test-Path $root)) { continue }
             $candidates = Get-ChildItem $root -Recurse -Filter dxc.exe -ErrorAction SilentlyContinue |
               Where-Object { $_.FullName -match '\\\\bin\\\\.*\\\\x64\\\\dxc\\.exe$' } |
               Sort-Object FullName -Descending
             if ($candidates) {
-              $dxc = $candidates[0].FullName
-              break
+              Set-DxcBasePath $candidates[0].FullName
+              exit 0
             }
           }
           
-          if (-not $dxc) {
-            Write-Host "::error::dxc.exe not found in Windows Kits. GPU shader build will fail."
+          # 3) Fallback: download from microsoft/DirectXShaderCompiler release assets
+          Write-Host "dxc.exe not found locally; downloading DXC release binaries..."
+          
+          $api = "https://api.github.com/repos/microsoft/DirectXShaderCompiler/releases/latest"
+          $release = Invoke-RestMethod -Uri $api -Headers @{ "Accept" = "application/vnd.github+json" }
+          if (-not $release.assets) {
+            Write-Host "::error::No assets found in DXC latest release response."
             exit 1
           }
           
-          $dxcBase = Split-Path (Split-Path $dxc -Parent) -Parent
-          Write-Host "Found dxc: $dxc"
-          Write-Host "Setting DXC_SDK_BASE_PATH=$dxcBase"
-          "DXC_SDK_BASE_PATH=$dxcBase" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $asset = $release.assets | Where-Object {
+            $_.name -match '(?i)dxc' -and $_.name -match '(?i)win|windows' -and $_.name -match '(?i)x64' -and $_.name -match '(?i)\\.zip$'
+          } | Select-Object -First 1
+          
+          if (-not $asset) {
+            $asset = $release.assets | Where-Object {
+              $_.name -match '(?i)dxc' -and $_.name -match '(?i)\\.zip$'
+            } | Select-Object -First 1
+          }
+          
+          if (-not $asset) {
+            Write-Host "::error::Could not find a suitable DXC Windows ZIP asset. Available assets:"
+            $release.assets | ForEach-Object { Write-Host " - $($_.name)" }
+            exit 1
+          }
+          
+          $zipPath = Join-Path $env:RUNNER_TEMP $asset.name
+          Write-Host "Downloading asset: $($asset.name)"
+          
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -MaximumRedirection 5
+          
+          $extractRoot = Join-Path $env:RUNNER_TEMP "dxc_sdk"
+          if (Test-Path $extractRoot) { Remove-Item $extractRoot -Recurse -Force }
+          New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
+          Expand-Archive -Path $zipPath -DestinationPath $extractRoot -Force
+          
+          $dxcExe = Get-ChildItem $extractRoot -Recurse -Filter dxc.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\\\bin\\\\x64\\\\dxc\\.exe$' } |
+            Select-Object -First 1
+          
+          if (-not $dxcExe) {
+            $dxcExe = Get-ChildItem $extractRoot -Recurse -Filter dxc.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          
+          if (-not $dxcExe) {
+            Write-Host "::error::Downloaded DXC archive did not contain dxc.exe"
+            exit 1
+          }
+          
+          Set-DxcBasePath $dxcExe.FullName
 
       - name: Download After Effects SDK (Mac)
         if: matrix.platform == 'mac'
@@ -714,4 +771,3 @@ jobs:
           path: artifacts/
           retention-days: 30
           if-no-files-found: error
-
