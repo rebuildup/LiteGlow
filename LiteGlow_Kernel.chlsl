@@ -1,0 +1,185 @@
+/*
+** LiteGlow GPU Kernel
+** DirectX HLSL Shader for GPU-accelerated glow effect
+*/
+
+#include "PrGPU/KernelSupport/KernelCore.h"
+#include "PrGPU/KernelSupport/KernelMemory.h"
+
+#if GF_DEVICE_TARGET_DEVICE
+#if GF_DEVICE_TARGET_HLSL
+    #define fmax max
+    #define fmin min
+#endif
+
+// Bright Pass Kernel - extracts bright areas with soft knee
+GF_KERNEL_FUNCTION(LiteGlowBrightPassKernel,
+    ((GF_PTR_READ_ONLY(float4))(inSrc))
+    ((GF_PTR(float4))(outDst)),
+    ((int)(inSrcPitch))
+    ((int)(inDstPitch))
+    ((int)(in16f))
+    ((unsigned int)(inWidth))
+    ((unsigned int)(inHeight))
+    ((float)(inThreshold))
+    ((float)(inStrength))
+    ((int)(inFactor)),
+    ((uint2)(inXY)(KERNEL_XY)))
+{
+    if (inXY.x < inWidth && inXY.y < inHeight)
+    {
+        // Sample from source with downsampling
+        uint srcX = inXY.x * inFactor;
+        uint srcY = inXY.y * inFactor;
+        
+        // Bilinear sampling approximation
+        float4 pixel = ReadFloat4(inSrc, srcY * inSrcPitch * inFactor + srcX, !!in16f);
+        
+        // Calculate luminance
+        float luma = pixel.z * 0.299f + pixel.y * 0.587f + pixel.x * 0.114f;
+        
+        // Soft knee threshold
+        float4 result;
+        if (luma <= inThreshold)
+        {
+            result = make_float4(0.0f, 0.0f, 0.0f, pixel.w);
+        }
+        else
+        {
+            float knee = (luma - inThreshold) / (1.0f + (luma - inThreshold));
+            float scale = knee * inStrength;
+            result.x = fmin(1.0f, pixel.x * scale);
+            result.y = fmin(1.0f, pixel.y * scale);
+            result.z = fmin(1.0f, pixel.z * scale);
+            result.w = pixel.w;
+        }
+        
+        WriteFloat4(result, outDst, inXY.y * inDstPitch + inXY.x, !!in16f);
+    }
+}
+
+// Horizontal Blur Kernel
+GF_KERNEL_FUNCTION(LiteGlowBlurHKernel,
+    ((GF_PTR_READ_ONLY(float4))(inSrc))
+    ((GF_PTR(float4))(outDst)),
+    ((int)(inSrcPitch))
+    ((int)(inDstPitch))
+    ((int)(in16f))
+    ((unsigned int)(inWidth))
+    ((unsigned int)(inHeight))
+    ((int)(inRadius)),
+    ((uint2)(inXY)(KERNEL_XY)))
+{
+    if (inXY.x < inWidth && inXY.y < inHeight)
+    {
+        float4 sum = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+        int count = 0;
+        
+        for (int i = -inRadius; i <= inRadius; ++i)
+        {
+            int sx = (int)inXY.x + i;
+            if (sx >= 0 && sx < (int)inWidth)
+            {
+                float4 sample = ReadFloat4(inSrc, inXY.y * inSrcPitch + sx, !!in16f);
+                sum.x += sample.x;
+                sum.y += sample.y;
+                sum.z += sample.z;
+                sum.w += sample.w;
+                count++;
+            }
+        }
+        
+        float4 result;
+        result.x = sum.x / (float)count;
+        result.y = sum.y / (float)count;
+        result.z = sum.z / (float)count;
+        result.w = sum.w / (float)count;
+        
+        WriteFloat4(result, outDst, inXY.y * inDstPitch + inXY.x, !!in16f);
+    }
+}
+
+// Vertical Blur Kernel
+GF_KERNEL_FUNCTION(LiteGlowBlurVKernel,
+    ((GF_PTR_READ_ONLY(float4))(inSrc))
+    ((GF_PTR(float4))(outDst)),
+    ((int)(inSrcPitch))
+    ((int)(inDstPitch))
+    ((int)(in16f))
+    ((unsigned int)(inWidth))
+    ((unsigned int)(inHeight))
+    ((int)(inRadius)),
+    ((uint2)(inXY)(KERNEL_XY)))
+{
+    if (inXY.x < inWidth && inXY.y < inHeight)
+    {
+        float4 sum = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+        int count = 0;
+        
+        for (int j = -inRadius; j <= inRadius; ++j)
+        {
+            int sy = (int)inXY.y + j;
+            if (sy >= 0 && sy < (int)inHeight)
+            {
+                float4 sample = ReadFloat4(inSrc, sy * inSrcPitch + inXY.x, !!in16f);
+                sum.x += sample.x;
+                sum.y += sample.y;
+                sum.z += sample.z;
+                sum.w += sample.w;
+                count++;
+            }
+        }
+        
+        float4 result;
+        result.x = sum.x / (float)count;
+        result.y = sum.y / (float)count;
+        result.z = sum.z / (float)count;
+        result.w = sum.w / (float)count;
+        
+        WriteFloat4(result, outDst, inXY.y * inDstPitch + inXY.x, !!in16f);
+    }
+}
+
+// Screen Blend Kernel - blends glow with original
+GF_KERNEL_FUNCTION(LiteGlowBlendKernel,
+    ((GF_PTR_READ_ONLY(float4))(inSrc))
+    ((GF_PTR_READ_ONLY(float4))(inGlow))
+    ((GF_PTR(float4))(outDst)),
+    ((int)(inSrcPitch))
+    ((int)(inGlowPitch))
+    ((int)(inDstPitch))
+    ((int)(in16f))
+    ((unsigned int)(inWidth))
+    ((unsigned int)(inHeight))
+    ((float)(inStrength))
+    ((int)(inFactor)),
+    ((uint2)(inXY)(KERNEL_XY)))
+{
+    if (inXY.x < inWidth && inXY.y < inHeight)
+    {
+        // Read original pixel
+        float4 original = ReadFloat4(inSrc, inXY.y * inSrcPitch + inXY.x, !!in16f);
+        
+        // Read glow pixel with upsampling (bilinear approximation)
+        uint glowX = inXY.x / inFactor;
+        uint glowY = inXY.y / inFactor;
+        float4 glow = ReadFloat4(inGlow, glowY * inGlowPitch + glowX, !!in16f);
+        
+        // Apply strength
+        glow.x *= inStrength;
+        glow.y *= inStrength;
+        glow.z *= inStrength;
+        
+        // Screen blend: 1 - (1-a)(1-b)
+        float4 result;
+        result.x = 1.0f - (1.0f - original.x) * (1.0f - glow.x);
+        result.y = 1.0f - (1.0f - original.y) * (1.0f - glow.y);
+        result.z = 1.0f - (1.0f - original.z) * (1.0f - glow.z);
+        result.w = original.w;
+        
+        WriteFloat4(result, outDst, inXY.y * inDstPitch + inXY.x, !!in16f);
+    }
+}
+
+#endif
+

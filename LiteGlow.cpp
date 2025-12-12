@@ -2,10 +2,27 @@
 #include "AEGP_SuiteHandler.h"
 #include "AEFX_SuiteHelper.h"
 #include "AE_EffectPixelFormat.h"
+#include "AE_EffectGPUSuites.h"
 
 #include <math.h>
 #include <cstdlib>
 #include <algorithm>
+
+// DirectX support for Windows
+#if defined(_WIN32)
+    #define HAS_HLSL 1
+    #include "DirectXUtils.h"
+#else
+    #define HAS_HLSL 0
+#endif
+
+#if HAS_HLSL
+inline PF_Err DXErr(bool inSuccess) {
+    if (inSuccess) { return PF_Err_NONE; }
+    else { return PF_Err_INTERNAL_STRUCT_DAMAGED; }
+}
+#define DX_ERR(FUNC) ERR(DXErr(FUNC))
+#endif
 
 // =============================================================================
 // LiteGlow - High-Performance Glow Effect
@@ -35,11 +52,16 @@ GlobalSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
         PF_OutFlag_PIX_INDEPENDENT |
         PF_OutFlag_DEEP_COLOR_AWARE;
 
-    // SmartRender + Multi-Frame Rendering + 32-bit float
+    // SmartRender + Multi-Frame Rendering + 32-bit float + GPU
     out_data->out_flags2 = 
         PF_OutFlag2_SUPPORTS_SMART_RENDER |
         PF_OutFlag2_SUPPORTS_THREADED_RENDERING |
-        PF_OutFlag2_FLOAT_COLOR_AWARE;
+        PF_OutFlag2_FLOAT_COLOR_AWARE |
+        PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
+    
+#if HAS_HLSL
+    out_data->out_flags2 |= PF_OutFlag2_SUPPORTS_DIRECTX_RENDERING;
+#endif
 
     return PF_Err_NONE;
 }
@@ -545,6 +567,346 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data,
 }
 
 // =============================================================================
+// GPU Data Structures
+// =============================================================================
+
+#if HAS_HLSL
+struct DirectXGPUData
+{
+    DXContextPtr mContext;
+    ShaderObjectPtr mBrightPassShader;
+    ShaderObjectPtr mBlurHShader;
+    ShaderObjectPtr mBlurVShader;
+    ShaderObjectPtr mBlendShader;
+};
+#endif
+
+// GPU Param structures must match shader constant buffer layout
+typedef struct {
+    int mSrcPitch;
+    int mDstPitch;
+    int m16f;
+    unsigned int mWidth;
+    unsigned int mHeight;
+    float mThreshold;
+    float mStrength;
+    int mFactor;
+} BrightPassParams;
+
+typedef struct {
+    int mSrcPitch;
+    int mDstPitch;
+    int m16f;
+    unsigned int mWidth;
+    unsigned int mHeight;
+    int mRadius;
+    int mPadding[2];  // Padding for alignment
+} BlurParams;
+
+typedef struct {
+    int mSrcPitch;
+    int mGlowPitch;
+    int mDstPitch;
+    int m16f;
+    unsigned int mWidth;
+    unsigned int mHeight;
+    float mStrength;
+    int mFactor;
+} BlendParams;
+
+// =============================================================================
+// GPU Device Setup/Setdown
+// =============================================================================
+
+static PF_Err
+GPUDeviceSetup(PF_InData* in_dataP, PF_OutData* out_dataP, PF_GPUDeviceSetupExtra* extraP)
+{
+    PF_Err err = PF_Err_NONE;
+
+    PF_GPUDeviceInfo device_info;
+    AEFX_CLR_STRUCT(device_info);
+
+    AEFX_SuiteScoper<PF_HandleSuite1> handle_suite = AEFX_SuiteScoper<PF_HandleSuite1>(
+        in_dataP, kPFHandleSuite, kPFHandleSuiteVersion1, out_dataP);
+
+    AEFX_SuiteScoper<PF_GPUDeviceSuite1> gpuDeviceSuite = AEFX_SuiteScoper<PF_GPUDeviceSuite1>(
+        in_dataP, kPFGPUDeviceSuite, kPFGPUDeviceSuiteVersion1, out_dataP);
+
+    gpuDeviceSuite->GetDeviceInfo(in_dataP->effect_ref, extraP->input->device_index, &device_info);
+
+#if HAS_HLSL
+    if (extraP->input->what_gpu == PF_GPU_Framework_DIRECTX)
+    {
+        PF_Handle gpu_dataH = handle_suite->host_new_handle(sizeof(DirectXGPUData));
+        DirectXGPUData* dx_gpu_data = reinterpret_cast<DirectXGPUData*>(*gpu_dataH);
+        memset(dx_gpu_data, 0, sizeof(DirectXGPUData));
+
+        // Create objects
+        dx_gpu_data->mContext = std::make_shared<DXContext>();
+        dx_gpu_data->mBrightPassShader = std::make_shared<ShaderObject>();
+        dx_gpu_data->mBlurHShader = std::make_shared<ShaderObject>();
+        dx_gpu_data->mBlurVShader = std::make_shared<ShaderObject>();
+        dx_gpu_data->mBlendShader = std::make_shared<ShaderObject>();
+
+        // Initialize DXContext
+        DX_ERR(dx_gpu_data->mContext->Initialize(
+            (ID3D12Device*)device_info.devicePV,
+            (ID3D12CommandQueue*)device_info.command_queuePV));
+
+        std::wstring csoPath, sigPath;
+
+        // Load BrightPass shader
+        DX_ERR(GetShaderPath(L"LiteGlowBrightPassKernel", csoPath, sigPath));
+        DX_ERR(dx_gpu_data->mContext->LoadShader(csoPath.c_str(), sigPath.c_str(), dx_gpu_data->mBrightPassShader));
+
+        // Load BlurH shader
+        DX_ERR(GetShaderPath(L"LiteGlowBlurHKernel", csoPath, sigPath));
+        DX_ERR(dx_gpu_data->mContext->LoadShader(csoPath.c_str(), sigPath.c_str(), dx_gpu_data->mBlurHShader));
+
+        // Load BlurV shader
+        DX_ERR(GetShaderPath(L"LiteGlowBlurVKernel", csoPath, sigPath));
+        DX_ERR(dx_gpu_data->mContext->LoadShader(csoPath.c_str(), sigPath.c_str(), dx_gpu_data->mBlurVShader));
+
+        // Load Blend shader
+        DX_ERR(GetShaderPath(L"LiteGlowBlendKernel", csoPath, sigPath));
+        DX_ERR(dx_gpu_data->mContext->LoadShader(csoPath.c_str(), sigPath.c_str(), dx_gpu_data->mBlendShader));
+
+        extraP->output->gpu_data = gpu_dataH;
+        out_dataP->out_flags2 = PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
+    }
+#endif
+
+    return err;
+}
+
+static PF_Err
+GPUDeviceSetdown(PF_InData* in_dataP, PF_OutData* out_dataP, PF_GPUDeviceSetdownExtra* extraP)
+{
+    PF_Err err = PF_Err_NONE;
+
+#if HAS_HLSL
+    if (extraP->input->what_gpu == PF_GPU_Framework_DIRECTX)
+    {
+        PF_Handle gpu_dataH = (PF_Handle)extraP->input->gpu_data;
+        if (gpu_dataH) {
+            DirectXGPUData* dx_gpu_data = reinterpret_cast<DirectXGPUData*>(*gpu_dataH);
+
+            dx_gpu_data->mContext.reset();
+            dx_gpu_data->mBrightPassShader.reset();
+            dx_gpu_data->mBlurHShader.reset();
+            dx_gpu_data->mBlurVShader.reset();
+            dx_gpu_data->mBlendShader.reset();
+
+            AEFX_SuiteScoper<PF_HandleSuite1> handle_suite = AEFX_SuiteScoper<PF_HandleSuite1>(
+                in_dataP, kPFHandleSuite, kPFHandleSuiteVersion1, out_dataP);
+            handle_suite->host_dispose_handle(gpu_dataH);
+        }
+    }
+#endif
+
+    return err;
+}
+
+// =============================================================================
+// GPU Render
+// =============================================================================
+
+static size_t DivideRoundUp(size_t inValue, size_t inMultiple)
+{
+    return inValue ? (inValue + inMultiple - 1) / inMultiple : 0;
+}
+
+static PF_Err
+SmartRenderGPU(PF_InData* in_dataP, PF_OutData* out_dataP,
+               PF_PixelFormat pixel_format,
+               PF_EffectWorld* input_worldP, PF_EffectWorld* output_worldP,
+               PF_SmartRenderExtra* extraP, const LiteGlowSettings* settings)
+{
+    PF_Err err = PF_Err_NONE;
+
+#if HAS_HLSL
+    if (extraP->input->what_gpu != PF_GPU_Framework_DIRECTX) {
+        return PF_Err_UNRECOGNIZED_PARAM_TYPE;
+    }
+
+    if (pixel_format != PF_PixelFormat_GPU_BGRA128) {
+        return PF_Err_UNRECOGNIZED_PARAM_TYPE;
+    }
+
+    AEFX_SuiteScoper<PF_GPUDeviceSuite1> gpu_suite = AEFX_SuiteScoper<PF_GPUDeviceSuite1>(
+        in_dataP, kPFGPUDeviceSuite, kPFGPUDeviceSuiteVersion1, out_dataP);
+
+    PF_GPUDeviceInfo device_info;
+    ERR(gpu_suite->GetDeviceInfo(in_dataP->effect_ref, extraP->input->device_index, &device_info));
+
+    PF_Handle gpu_dataH = (PF_Handle)extraP->input->gpu_data;
+    DirectXGPUData* dx_gpu_data = reinterpret_cast<DirectXGPUData*>(*gpu_dataH);
+
+    A_long bytes_per_pixel = 16;  // BGRA128 = 4 * 4 bytes
+
+    // Calculate downsample factor
+    int quality = settings->quality;
+    int ds = (quality == QUALITY_HIGH) ? 1 : (quality == QUALITY_MEDIUM ? 2 : 4);
+    unsigned int dsW = MAX(1, (unsigned int)(output_worldP->width / ds));
+    unsigned int dsH = MAX(1, (unsigned int)(output_worldP->height / ds));
+    int ds_radius = MAX(1, (int)(settings->radius / ds));
+    if (quality == QUALITY_HIGH) ds_radius += 2;
+    ds_radius = MIN(ds_radius, 24);
+
+    float strength_norm = settings->strength / 2000.0f;
+    float threshold_norm = settings->threshold / 255.0f;
+
+    // Allocate intermediate GPU buffers
+    PF_EffectWorld* brightWorld = nullptr;
+    PF_EffectWorld* blur1World = nullptr;
+    PF_EffectWorld* blur2World = nullptr;
+
+    ERR(gpu_suite->CreateGPUWorld(in_dataP->effect_ref, extraP->input->device_index,
+        dsW, dsH, input_worldP->pix_aspect_ratio, in_dataP->field,
+        pixel_format, false, &brightWorld));
+    ERR(gpu_suite->CreateGPUWorld(in_dataP->effect_ref, extraP->input->device_index,
+        dsW, dsH, input_worldP->pix_aspect_ratio, in_dataP->field,
+        pixel_format, false, &blur1World));
+    ERR(gpu_suite->CreateGPUWorld(in_dataP->effect_ref, extraP->input->device_index,
+        dsW, dsH, input_worldP->pix_aspect_ratio, in_dataP->field,
+        pixel_format, false, &blur2World));
+
+    if (err) goto cleanup;
+
+    {
+        void* src_mem = nullptr;
+        void* dst_mem = nullptr;
+        void* bright_mem = nullptr;
+        void* blur1_mem = nullptr;
+        void* blur2_mem = nullptr;
+
+        ERR(gpu_suite->GetGPUWorldData(in_dataP->effect_ref, input_worldP, &src_mem));
+        ERR(gpu_suite->GetGPUWorldData(in_dataP->effect_ref, output_worldP, &dst_mem));
+        ERR(gpu_suite->GetGPUWorldData(in_dataP->effect_ref, brightWorld, &bright_mem));
+        ERR(gpu_suite->GetGPUWorldData(in_dataP->effect_ref, blur1World, &blur1_mem));
+        ERR(gpu_suite->GetGPUWorldData(in_dataP->effect_ref, blur2World, &blur2_mem));
+
+        if (err) goto cleanup;
+
+        // 1) Bright Pass
+        {
+            BrightPassParams params;
+            params.mSrcPitch = input_worldP->rowbytes / bytes_per_pixel;
+            params.mDstPitch = brightWorld->rowbytes / bytes_per_pixel;
+            params.m16f = 0;
+            params.mWidth = dsW;
+            params.mHeight = dsH;
+            params.mThreshold = threshold_norm;
+            params.mStrength = 1.5f;
+            params.mFactor = ds;
+
+            DXShaderExecution shaderExec(dx_gpu_data->mContext, dx_gpu_data->mBrightPassShader, 3);
+            DX_ERR(shaderExec.SetParamBuffer(&params, sizeof(BrightPassParams)));
+            DX_ERR(shaderExec.SetUnorderedAccessView((ID3D12Resource*)bright_mem, dsH * brightWorld->rowbytes));
+            DX_ERR(shaderExec.SetShaderResourceView((ID3D12Resource*)src_mem, input_worldP->height * input_worldP->rowbytes));
+            DX_ERR(shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16)));
+        }
+
+        // 2) Blur Pass 1: Horizontal
+        {
+            BlurParams params;
+            params.mSrcPitch = brightWorld->rowbytes / bytes_per_pixel;
+            params.mDstPitch = blur1World->rowbytes / bytes_per_pixel;
+            params.m16f = 0;
+            params.mWidth = dsW;
+            params.mHeight = dsH;
+            params.mRadius = ds_radius;
+
+            DXShaderExecution shaderExec(dx_gpu_data->mContext, dx_gpu_data->mBlurHShader, 3);
+            DX_ERR(shaderExec.SetParamBuffer(&params, sizeof(BlurParams)));
+            DX_ERR(shaderExec.SetUnorderedAccessView((ID3D12Resource*)blur1_mem, dsH * blur1World->rowbytes));
+            DX_ERR(shaderExec.SetShaderResourceView((ID3D12Resource*)bright_mem, dsH * brightWorld->rowbytes));
+            DX_ERR(shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16)));
+        }
+
+        // 3) Blur Pass 2: Vertical
+        {
+            BlurParams params;
+            params.mSrcPitch = blur1World->rowbytes / bytes_per_pixel;
+            params.mDstPitch = blur2World->rowbytes / bytes_per_pixel;
+            params.m16f = 0;
+            params.mWidth = dsW;
+            params.mHeight = dsH;
+            params.mRadius = ds_radius;
+
+            DXShaderExecution shaderExec(dx_gpu_data->mContext, dx_gpu_data->mBlurVShader, 3);
+            DX_ERR(shaderExec.SetParamBuffer(&params, sizeof(BlurParams)));
+            DX_ERR(shaderExec.SetUnorderedAccessView((ID3D12Resource*)blur2_mem, dsH * blur2World->rowbytes));
+            DX_ERR(shaderExec.SetShaderResourceView((ID3D12Resource*)blur1_mem, dsH * blur1World->rowbytes));
+            DX_ERR(shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16)));
+        }
+
+        // 4) Blur Pass 3: Horizontal
+        {
+            BlurParams params;
+            params.mSrcPitch = blur2World->rowbytes / bytes_per_pixel;
+            params.mDstPitch = blur1World->rowbytes / bytes_per_pixel;
+            params.m16f = 0;
+            params.mWidth = dsW;
+            params.mHeight = dsH;
+            params.mRadius = ds_radius;
+
+            DXShaderExecution shaderExec(dx_gpu_data->mContext, dx_gpu_data->mBlurHShader, 3);
+            DX_ERR(shaderExec.SetParamBuffer(&params, sizeof(BlurParams)));
+            DX_ERR(shaderExec.SetUnorderedAccessView((ID3D12Resource*)blur1_mem, dsH * blur1World->rowbytes));
+            DX_ERR(shaderExec.SetShaderResourceView((ID3D12Resource*)blur2_mem, dsH * blur2World->rowbytes));
+            DX_ERR(shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16)));
+        }
+
+        // 5) Blur Pass 4: Vertical
+        {
+            BlurParams params;
+            params.mSrcPitch = blur1World->rowbytes / bytes_per_pixel;
+            params.mDstPitch = blur2World->rowbytes / bytes_per_pixel;
+            params.m16f = 0;
+            params.mWidth = dsW;
+            params.mHeight = dsH;
+            params.mRadius = ds_radius;
+
+            DXShaderExecution shaderExec(dx_gpu_data->mContext, dx_gpu_data->mBlurVShader, 3);
+            DX_ERR(shaderExec.SetParamBuffer(&params, sizeof(BlurParams)));
+            DX_ERR(shaderExec.SetUnorderedAccessView((ID3D12Resource*)blur2_mem, dsH * blur2World->rowbytes));
+            DX_ERR(shaderExec.SetShaderResourceView((ID3D12Resource*)blur1_mem, dsH * blur1World->rowbytes));
+            DX_ERR(shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16)));
+        }
+
+        // 6) Screen Blend
+        {
+            BlendParams params;
+            params.mSrcPitch = input_worldP->rowbytes / bytes_per_pixel;
+            params.mGlowPitch = blur2World->rowbytes / bytes_per_pixel;
+            params.mDstPitch = output_worldP->rowbytes / bytes_per_pixel;
+            params.m16f = 0;
+            params.mWidth = output_worldP->width;
+            params.mHeight = output_worldP->height;
+            params.mStrength = strength_norm * 2.0f;
+            params.mFactor = ds;
+
+            DXShaderExecution shaderExec(dx_gpu_data->mContext, dx_gpu_data->mBlendShader, 4);
+            DX_ERR(shaderExec.SetParamBuffer(&params, sizeof(BlendParams)));
+            DX_ERR(shaderExec.SetUnorderedAccessView((ID3D12Resource*)dst_mem, output_worldP->height * output_worldP->rowbytes));
+            DX_ERR(shaderExec.SetShaderResourceView((ID3D12Resource*)src_mem, input_worldP->height * input_worldP->rowbytes));
+            DX_ERR(shaderExec.SetShaderResourceView((ID3D12Resource*)blur2_mem, dsH * blur2World->rowbytes));
+            DX_ERR(shaderExec.Execute((UINT)DivideRoundUp(output_worldP->width, 16), (UINT)DivideRoundUp(output_worldP->height, 16)));
+        }
+    }
+
+cleanup:
+    if (brightWorld) gpu_suite->DisposeGPUWorld(in_dataP->effect_ref, brightWorld);
+    if (blur1World) gpu_suite->DisposeGPUWorld(in_dataP->effect_ref, blur1World);
+    if (blur2World) gpu_suite->DisposeGPUWorld(in_dataP->effect_ref, blur2World);
+
+#endif // HAS_HLSL
+
+    return err;
+}
+
+// =============================================================================
 // Smart Render Handlers
 // =============================================================================
 
@@ -554,6 +916,9 @@ SmartPreRender(PF_InData* in_data, PF_OutData* out_data, PF_PreRenderExtra* pre)
     PF_Err err = PF_Err_NONE;
     PF_RenderRequest req = pre->input->output_request;
     PF_CheckoutResult in_result;
+
+    // Signal that GPU rendering is possible
+    pre->output->flags |= PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
 
     ERR(pre->cb->checkout_layer(
         in_data->effect_ref,
@@ -572,7 +937,7 @@ SmartPreRender(PF_InData* in_data, PF_OutData* out_data, PF_PreRenderExtra* pre)
 }
 
 static PF_Err
-SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extraP)
+SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extraP, bool isGPU)
 {
     PF_Err err = PF_Err_NONE;
     PF_Err err2 = PF_Err_NONE;
@@ -604,7 +969,16 @@ SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extra
         settings.threshold = threshold_param.u.fs_d.value;
         settings.quality = quality_param.u.pd.value;
 
-        err = ProcessWorlds(in_data, out_data, &settings, input_worldP, output_worldP);
+        if (isGPU) {
+            AEFX_SuiteScoper<PF_WorldSuite2> world_suite = AEFX_SuiteScoper<PF_WorldSuite2>(
+                in_data, kPFWorldSuite, kPFWorldSuiteVersion2, out_data);
+            PF_PixelFormat pixel_format = PF_PixelFormat_INVALID;
+            ERR(world_suite->PF_GetPixelFormat(input_worldP, &pixel_format));
+            
+            err = SmartRenderGPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, &settings);
+        } else {
+            err = ProcessWorlds(in_data, out_data, &settings, input_worldP, output_worldP);
+        }
     }
 
     ERR2(PF_CHECKIN_PARAM(in_data, &strength_param));
@@ -674,6 +1048,12 @@ EffectMain(
         case PF_Cmd_PARAMS_SETUP:
             err = ParamsSetup(in_data, out_data, params, output);
             break;
+        case PF_Cmd_GPU_DEVICE_SETUP:
+            err = GPUDeviceSetup(in_data, out_data, (PF_GPUDeviceSetupExtra*)extra);
+            break;
+        case PF_Cmd_GPU_DEVICE_SETDOWN:
+            err = GPUDeviceSetdown(in_data, out_data, (PF_GPUDeviceSetdownExtra*)extra);
+            break;
         case PF_Cmd_RENDER:
             err = Render(in_data, out_data, params, output);
             break;
@@ -681,7 +1061,10 @@ EffectMain(
             err = SmartPreRender(in_data, out_data, (PF_PreRenderExtra*)extra);
             break;
         case PF_Cmd_SMART_RENDER:
-            err = SmartRender(in_data, out_data, (PF_SmartRenderExtra*)extra);
+            err = SmartRender(in_data, out_data, (PF_SmartRenderExtra*)extra, false);
+            break;
+        case PF_Cmd_SMART_RENDER_GPU:
+            err = SmartRender(in_data, out_data, (PF_SmartRenderExtra*)extra, true);
             break;
         default:
             break;
