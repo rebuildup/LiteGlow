@@ -73,6 +73,37 @@ jobs:
         with:
           arch: x64
 
+      - name: Locate DXC (Windows)
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: |
+          $roots = @(
+            "C:\Program Files (x86)\Windows Kits\10\bin",
+            "C:\Program Files\Windows Kits\10\bin"
+          )
+          
+          $dxc = $null
+          foreach ($root in $roots) {
+            if (-not (Test-Path $root)) { continue }
+            $candidates = Get-ChildItem $root -Recurse -Filter dxc.exe -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\\\bin\\\\.*\\\\x64\\\\dxc\\.exe$' } |
+              Sort-Object FullName -Descending
+            if ($candidates) {
+              $dxc = $candidates[0].FullName
+              break
+            }
+          }
+          
+          if (-not $dxc) {
+            Write-Host "::error::dxc.exe not found in Windows Kits. GPU shader build will fail."
+            exit 1
+          }
+          
+          $dxcBase = Split-Path (Split-Path $dxc -Parent) -Parent
+          Write-Host "Found dxc: $dxc"
+          Write-Host "Setting DXC_SDK_BASE_PATH=$dxcBase"
+          "DXC_SDK_BASE_PATH=$dxcBase" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Download After Effects SDK (Mac)
         if: matrix.platform == 'mac'
         env:
@@ -683,5 +714,4 @@ jobs:
           path: artifacts/
           retention-days: 30
           if-no-files-found: error
-
 

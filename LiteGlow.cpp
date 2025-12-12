@@ -756,7 +756,14 @@ SmartRenderGPU(PF_InData* in_dataP, PF_OutData* out_dataP,
     unsigned int dsW = MAX(1, (unsigned int)(output_worldP->width / ds));
     unsigned int dsH = MAX(1, (unsigned int)(output_worldP->height / ds));
     int ds_radius = MAX(1, (int)(settings->radius / ds));
-    if (quality == QUALITY_HIGH) ds_radius += 2;
+    // Blur iterations: 2 (H+V twice) for high quality, 1 for medium/low.
+    const int blur_iterations = (quality == QUALITY_HIGH) ? 2 : 1;
+    if (blur_iterations == 2) {
+        ds_radius += 2;
+    } else {
+        // Compensate for fewer passes (single box blur vs. repeated box blurs).
+        ds_radius = (int)(ds_radius * 1.4f + 0.5f);
+    }
     ds_radius = MIN(ds_radius, 24);
 
     float strength_norm = settings->strength / 2000.0f;
@@ -847,38 +854,40 @@ SmartRenderGPU(PF_InData* in_dataP, PF_OutData* out_dataP,
             DX_ERR(shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16)));
         }
 
-        // 4) Blur Pass 3: Horizontal
-        {
-            BlurParams params;
-            params.mSrcPitch = blur2World->rowbytes / bytes_per_pixel;
-            params.mDstPitch = blur1World->rowbytes / bytes_per_pixel;
-            params.m16f = 0;
-            params.mWidth = dsW;
-            params.mHeight = dsH;
-            params.mRadius = ds_radius;
+        if (blur_iterations == 2) {
+            // 4) Blur Pass 3: Horizontal
+            {
+                BlurParams params;
+                params.mSrcPitch = blur2World->rowbytes / bytes_per_pixel;
+                params.mDstPitch = blur1World->rowbytes / bytes_per_pixel;
+                params.m16f = 0;
+                params.mWidth = dsW;
+                params.mHeight = dsH;
+                params.mRadius = ds_radius;
 
-            DXShaderExecution shaderExec(dx_gpu_data->mContext, dx_gpu_data->mBlurHShader, 3);
-            DX_ERR(shaderExec.SetParamBuffer(&params, sizeof(BlurParams)));
-            DX_ERR(shaderExec.SetUnorderedAccessView((ID3D12Resource*)blur1_mem, dsH * blur1World->rowbytes));
-            DX_ERR(shaderExec.SetShaderResourceView((ID3D12Resource*)blur2_mem, dsH * blur2World->rowbytes));
-            DX_ERR(shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16)));
-        }
+                DXShaderExecution shaderExec(dx_gpu_data->mContext, dx_gpu_data->mBlurHShader, 3);
+                DX_ERR(shaderExec.SetParamBuffer(&params, sizeof(BlurParams)));
+                DX_ERR(shaderExec.SetUnorderedAccessView((ID3D12Resource*)blur1_mem, dsH * blur1World->rowbytes));
+                DX_ERR(shaderExec.SetShaderResourceView((ID3D12Resource*)blur2_mem, dsH * blur2World->rowbytes));
+                DX_ERR(shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16)));
+            }
 
-        // 5) Blur Pass 4: Vertical
-        {
-            BlurParams params;
-            params.mSrcPitch = blur1World->rowbytes / bytes_per_pixel;
-            params.mDstPitch = blur2World->rowbytes / bytes_per_pixel;
-            params.m16f = 0;
-            params.mWidth = dsW;
-            params.mHeight = dsH;
-            params.mRadius = ds_radius;
+            // 5) Blur Pass 4: Vertical
+            {
+                BlurParams params;
+                params.mSrcPitch = blur1World->rowbytes / bytes_per_pixel;
+                params.mDstPitch = blur2World->rowbytes / bytes_per_pixel;
+                params.m16f = 0;
+                params.mWidth = dsW;
+                params.mHeight = dsH;
+                params.mRadius = ds_radius;
 
-            DXShaderExecution shaderExec(dx_gpu_data->mContext, dx_gpu_data->mBlurVShader, 3);
-            DX_ERR(shaderExec.SetParamBuffer(&params, sizeof(BlurParams)));
-            DX_ERR(shaderExec.SetUnorderedAccessView((ID3D12Resource*)blur2_mem, dsH * blur2World->rowbytes));
-            DX_ERR(shaderExec.SetShaderResourceView((ID3D12Resource*)blur1_mem, dsH * blur1World->rowbytes));
-            DX_ERR(shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16)));
+                DXShaderExecution shaderExec(dx_gpu_data->mContext, dx_gpu_data->mBlurVShader, 3);
+                DX_ERR(shaderExec.SetParamBuffer(&params, sizeof(BlurParams)));
+                DX_ERR(shaderExec.SetUnorderedAccessView((ID3D12Resource*)blur2_mem, dsH * blur2World->rowbytes));
+                DX_ERR(shaderExec.SetShaderResourceView((ID3D12Resource*)blur1_mem, dsH * blur1World->rowbytes));
+                DX_ERR(shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16)));
+            }
         }
 
         // 6) Screen Blend
