@@ -17,12 +17,14 @@
 #define GF_DEVICE_TARGET_HLSL 0
 #endif
 
-#ifndef GF_DEVICE_TARGET_DEVICE
+/* Ensure device-target blocks are kept when preprocessing for HLSL. */
 #if GF_DEVICE_TARGET_HLSL
-#define GF_DEVICE_TARGET_DEVICE 1
+  #undef GF_DEVICE_TARGET_DEVICE
+  #define GF_DEVICE_TARGET_DEVICE 1
 #else
-#define GF_DEVICE_TARGET_DEVICE 0
-#endif
+  #ifndef GF_DEVICE_TARGET_DEVICE
+    #define GF_DEVICE_TARGET_DEVICE 0
+  #endif
 #endif
 
 /* Pointer qualifier macros used in kernel argument lists */
@@ -39,8 +41,17 @@
 #define KERNEL_XY
 #endif
 
+/*
+ * Kernel declaration macro.
+ * In the full SDK this expands argument sequences via Boost. For preprocessing
+ * fallback we keep the kernel name visible so ParseHLSL can locate entrypoints.
+ */
+#ifndef GF_KERNEL_FUNCTION
+#define GF_KERNEL_FUNCTION(name, buffers, values, threadpos) \
+    void name buffers values threadpos
+#endif
+
 /* Small helpers referenced by kernels; keep simple for preprocessing */
 #ifndef make_float4
 #define make_float4(x,y,z,w) float4(x,y,z,w)
 #endif
-

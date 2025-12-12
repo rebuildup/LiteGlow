@@ -3,8 +3,8 @@
 ** DirectX HLSL Shader for GPU-accelerated glow effect
 */
 
-#include "PrGPU/KernelSupport/KernelCore.h"
-#include "PrGPU/KernelSupport/KernelMemory.h"
+#include <PrGPU/KernelSupport/KernelCore.h>
+#include <PrGPU/KernelSupport/KernelMemory.h>
 
 #if GF_DEVICE_TARGET_DEVICE
 #if GF_DEVICE_TARGET_HLSL
@@ -182,5 +182,4 @@ GF_KERNEL_FUNCTION(LiteGlowBlendKernel,
 }
 
 #endif
-
 
