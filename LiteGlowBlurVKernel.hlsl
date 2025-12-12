@@ -27,21 +27,26 @@ void main(uint3 dtid : SV_DispatchThreadID)
 
     const int x = (int)dtid.x;
     const int y = (int)dtid.y;
-    const int r = mRadius;
+    const int r = max(1, mRadius);
 
-    float4 sum = 0.0f;
-    int count = 0;
+    const int step = max(1, r / 2);
+    const float w0 = 0.0625f;
+    const float w1 = 0.25f;
+    const float w2 = 0.375f;
 
-    [loop]
-    for (int j = -r; j <= r; ++j)
-    {
-        const int sy = clamp(y + j, 0, (int)mHeight - 1);
-        const uint idx = (uint)sy * (uint)mSrcPitch + (uint)x;
-        sum += inSrc[idx];
-        count++;
-    }
+    const int y0 = clamp(y - 2 * step, 0, (int)mHeight - 1);
+    const int y1 = clamp(y - step,     0, (int)mHeight - 1);
+    const int y2 = y;
+    const int y3 = clamp(y + step,     0, (int)mHeight - 1);
+    const int y4 = clamp(y + 2 * step, 0, (int)mHeight - 1);
 
-    const uint outIdx = (uint)y * (uint)mDstPitch + (uint)x;
-    outDst[outIdx] = sum / (float)count;
+    const uint col = (uint)x;
+    float4 sum =
+        inSrc[(uint)y0 * (uint)mSrcPitch + col] * w0 +
+        inSrc[(uint)y1 * (uint)mSrcPitch + col] * w1 +
+        inSrc[(uint)y2 * (uint)mSrcPitch + col] * w2 +
+        inSrc[(uint)y3 * (uint)mSrcPitch + col] * w1 +
+        inSrc[(uint)y4 * (uint)mSrcPitch + col] * w0;
+
+    outDst[(uint)y * (uint)mDstPitch + col] = sum;
 }
-

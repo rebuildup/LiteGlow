@@ -27,21 +27,28 @@ void main(uint3 dtid : SV_DispatchThreadID)
 
     const int x = (int)dtid.x;
     const int y = (int)dtid.y;
-    const int r = mRadius;
+    const int r = max(1, mRadius);
 
-    float4 sum = 0.0f;
-    int count = 0;
+    // Fast 5-tap separable blur with adjustable step to approximate a wider radius.
+    // Weights are binomial (1 4 6 4 1)/16.
+    const int step = max(1, r / 2);
+    const float w0 = 0.0625f;
+    const float w1 = 0.25f;
+    const float w2 = 0.375f;
 
-    [loop]
-    for (int i = -r; i <= r; ++i)
-    {
-        const int sx = clamp(x + i, 0, (int)mWidth - 1);
-        const uint idx = (uint)y * (uint)mSrcPitch + (uint)sx;
-        sum += inSrc[idx];
-        count++;
-    }
+    const int x0 = clamp(x - 2 * step, 0, (int)mWidth - 1);
+    const int x1 = clamp(x - step,     0, (int)mWidth - 1);
+    const int x2 = x;
+    const int x3 = clamp(x + step,     0, (int)mWidth - 1);
+    const int x4 = clamp(x + 2 * step, 0, (int)mWidth - 1);
 
-    const uint outIdx = (uint)y * (uint)mDstPitch + (uint)x;
-    outDst[outIdx] = sum / (float)count;
+    const uint rowBase = (uint)y * (uint)mSrcPitch;
+    float4 sum =
+        inSrc[rowBase + (uint)x0] * w0 +
+        inSrc[rowBase + (uint)x1] * w1 +
+        inSrc[rowBase + (uint)x2] * w2 +
+        inSrc[rowBase + (uint)x3] * w1 +
+        inSrc[rowBase + (uint)x4] * w0;
+
+    outDst[(uint)y * (uint)mDstPitch + (uint)x] = sum;
 }
-

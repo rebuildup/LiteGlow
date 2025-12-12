@@ -25,11 +25,27 @@ void main(uint3 dtid : SV_DispatchThreadID)
         return;
     }
 
-    const uint srcX = dtid.x * (uint)mFactor;
-    const uint srcY = dtid.y * (uint)mFactor;
-    const uint srcIdx = srcY * (uint)mSrcPitch + srcX;
+    const uint factor = (uint)max(1, mFactor);
+    const uint srcX0 = dtid.x * factor;
+    const uint srcY0 = dtid.y * factor;
 
-    float4 pixel = inSrc[srcIdx];
+    // Box downsample (factor x factor). This reduces aliasing artifacts when ds>1.
+    float4 pixel = 0.0f;
+    uint count = 0;
+    [loop]
+    for (uint j = 0; j < factor; ++j)
+    {
+        const uint sy = srcY0 + j;
+        [loop]
+        for (uint i = 0; i < factor; ++i)
+        {
+            const uint sx = srcX0 + i;
+            const uint idx = sy * (uint)mSrcPitch + sx;
+            pixel += inSrc[idx];
+            count++;
+        }
+    }
+    pixel *= (1.0f / (float)count);
 
     // BGRA: x=B, y=G, z=R, w=A
     const float luma = pixel.z * 0.299f + pixel.y * 0.587f + pixel.x * 0.114f;
@@ -40,10 +56,10 @@ void main(uint3 dtid : SV_DispatchThreadID)
         const float diff = luma - mThreshold;
         const float knee = diff / (1.0f + diff);
         const float scale = knee * mStrength;
-        result.xyz = min(1.0f, pixel.xyz * scale);
+        // Allow HDR glow (do not clamp here); the blend stage will apply tone mapping.
+        result.xyz = pixel.xyz * scale;
     }
 
     const uint dstIdx = dtid.y * (uint)mDstPitch + dtid.x;
     outDst[dstIdx] = result;
 }
-
