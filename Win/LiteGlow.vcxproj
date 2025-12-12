@@ -366,7 +366,7 @@ cl /D "MSWindows" /EP $(IntDir)%(Filename).rrc &gt;               "$(ProjectDir)
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">rem Correct compilation is dependent on DXC being installed correctly, from the DirectX Shader Compiler
 del /Q "$(ProjectDir)LiteGlow_Kernel.i" 2&gt; nul
 if not exist "$(IntDir)DirectX_Assets" mkdir "$(IntDir)DirectX_Assets"
-call cl.exe /nologo -D GF_DEVICE_TARGET_HLSL=1 -I"$(BOOST_BASE_PATH)" -I"..\..\..\GPUUtils" -I"$(ProjectDir)" /TP /P "..\LiteGlow_Kernel.chlsl" /Fi"..\LiteGlow_Kernel.i"
+call cl.exe /nologo -D GF_DEVICE_TARGET_HLSL=1 -I"$(BOOST_BASE_PATH)" -I"..\..\..\GPUUtils" -I"$(ProjectDir)" /P /TP /Tp"..\LiteGlow_Kernel.chlsl" /Fi"..\LiteGlow_Kernel.i"
 python "..\..\..\GPUUtils\ParseHLSL.py" -i "..\LiteGlow_Kernel.i" -o "$(IntDir)." -e LiteGlowBrightPassKernel
 "$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "$(IntDir)LiteGlowBrightPassKernel.hlsl" -E main -Fo "$(IntDir)DirectX_Assets\LiteGlowBrightPassKernel.cso" -Frs "$(IntDir)DirectX_Assets\LiteGlowBrightPassKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives
 python "..\..\..\GPUUtils\ParseHLSL.py" -i "..\LiteGlow_Kernel.i" -o "$(IntDir)." -e LiteGlowBlurHKernel
@@ -378,7 +378,7 @@ python "..\..\..\GPUUtils\ParseHLSL.py" -i "..\LiteGlow_Kernel.i" -o "$(IntDir).
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">rem Correct compilation is dependent on DXC being installed correctly, from the DirectX Shader Compiler
 del /Q "$(ProjectDir)LiteGlow_Kernel.i" 2&gt; nul
 if not exist "$(IntDir)DirectX_Assets" mkdir "$(IntDir)DirectX_Assets"
-call cl.exe /nologo -D GF_DEVICE_TARGET_HLSL=1 -I"$(BOOST_BASE_PATH)" -I"..\..\..\GPUUtils" -I"$(ProjectDir)" /TP /P "..\LiteGlow_Kernel.chlsl" /Fi"..\LiteGlow_Kernel.i"
+call cl.exe /nologo -D GF_DEVICE_TARGET_HLSL=1 -I"$(BOOST_BASE_PATH)" -I"..\..\..\GPUUtils" -I"$(ProjectDir)" /P /TP /Tp"..\LiteGlow_Kernel.chlsl" /Fi"..\LiteGlow_Kernel.i"
 python "..\..\..\GPUUtils\ParseHLSL.py" -i "..\LiteGlow_Kernel.i" -o "$(IntDir)." -e LiteGlowBrightPassKernel
 "$(DXC_SDK_BASE_PATH)\bin\x64\dxc.exe" "$(IntDir)LiteGlowBrightPassKernel.hlsl" -E main -Fo "$(IntDir)DirectX_Assets\LiteGlowBrightPassKernel.cso" -Frs "$(IntDir)DirectX_Assets\LiteGlowBrightPassKernel.rs" -T cs_6_5 -enable-16bit-types -ignore-line-directives
 python "..\..\..\GPUUtils\ParseHLSL.py" -i "..\LiteGlow_Kernel.i" -o "$(IntDir)." -e LiteGlowBlurHKernel
