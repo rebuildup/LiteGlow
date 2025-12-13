@@ -25,7 +25,12 @@ static uint ByteOffset(uint pitch, uint x, uint y)
 static float4 LoadF4(ByteAddressBuffer b, uint byteOffset)
 {
     uint4 u = b.Load4(byteOffset);
-    return asfloat(u);
+    float4 v = asfloat(u);
+    // Defensive: treat NaN/Inf as 0 to avoid "black" artifacts downstream.
+    if (any(isnan(v)) || any(isinf(v))) {
+        v = float4(0.0f, 0.0f, 0.0f, 1.0f);
+    }
+    return v;
 }
 
 static void StoreF4(RWByteAddressBuffer b, uint byteOffset, float4 v)
@@ -63,6 +68,10 @@ void main(uint3 dtid : SV_DispatchThreadID)
         }
     }
     pixel *= (1.0f / (float)count);
+    // Keep alpha sane (AE can behave badly with NaN/Inf alpha).
+    if (isnan(pixel.w) || isinf(pixel.w)) {
+        pixel.w = 1.0f;
+    }
 
     // BGRA: x=B, y=G, z=R, w=A
     const float luma = pixel.z * 0.299f + pixel.y * 0.587f + pixel.x * 0.114f;

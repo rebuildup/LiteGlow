@@ -25,7 +25,11 @@ static uint ByteOffset(uint pitch, uint x, uint y)
 static float4 LoadF4(ByteAddressBuffer b, uint byteOffset)
 {
     uint4 u = b.Load4(byteOffset);
-    return asfloat(u);
+    float4 v = asfloat(u);
+    if (any(isnan(v)) || any(isinf(v))) {
+        v = float4(0.0f, 0.0f, 0.0f, 1.0f);
+    }
+    return v;
 }
 
 static void StoreF4(RWByteAddressBuffer b, uint byteOffset, float4 v)

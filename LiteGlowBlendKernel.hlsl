@@ -26,7 +26,11 @@ static uint ByteOffset(uint pitch, uint x, uint y)
 static float4 LoadF4(ByteAddressBuffer b, uint byteOffset)
 {
     uint4 u = b.Load4(byteOffset);
-    return asfloat(u);
+    float4 v = asfloat(u);
+    if (any(isnan(v)) || any(isinf(v))) {
+        v = float4(0.0f, 0.0f, 0.0f, 1.0f);
+    }
+    return v;
 }
 
 static void StoreF4(RWByteAddressBuffer b, uint byteOffset, float4 v)
@@ -67,6 +71,10 @@ void main(uint3 dtid : SV_DispatchThreadID)
     float4 g11 = LoadF4(inGlow, ByteOffset((uint)mGlowPitch, (uint)x1, (uint)y1));
 
     float4 glow = lerp(lerp(g00, g10, fx), lerp(g01, g11, fx), fy);
+    // Prevent NaN propagation from bad reads.
+    if (any(isnan(glow)) || any(isinf(glow))) {
+        glow = 0.0f;
+    }
 
     // Stable HDR-to-display mapping:
     // g' = 1 - exp(-g*s)  (film-like, avoids hard clipping at high Strength)
@@ -77,11 +85,16 @@ void main(uint3 dtid : SV_DispatchThreadID)
     float3 rgb = 1.0f - (1.0f - original.xyz) * (1.0f - g);
 
     // Hard clip to display white (user requirement).
-    // Note: clamp also acts as a safety net against out-of-range values at high Strength.
     if (any(isnan(rgb)) || any(isinf(rgb))) {
         rgb = 0.0f;
     }
     rgb = saturate(rgb);
 
-    StoreF4(outDst, ByteOffset((uint)mDstPitch, x, y), float4(rgb, original.w));
+    float a = original.w;
+    if (isnan(a) || isinf(a)) {
+        a = 1.0f;
+    }
+    a = saturate(a);
+
+    StoreF4(outDst, ByteOffset((uint)mDstPitch, x, y), float4(rgb, a));
 }
