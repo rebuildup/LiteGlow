@@ -81,8 +81,13 @@ void main(uint3 dtid : SV_DispatchThreadID)
     float3 g = max(0.0f, glow.xyz * mStrength);
     g = 1.0f - exp(-g);
 
+    // User requirement: output must be within display white.
+    // Clamp the base layer first, otherwise HDR inputs (original>1) combined with g in (0..1)
+    // can produce negative values with the screen formula (which then clamp to black).
+    const float3 base = saturate(original.xyz);
+
     // Screen: 1 - (1-a)(1-b)
-    float3 rgb = 1.0f - (1.0f - original.xyz) * (1.0f - g);
+    float3 rgb = 1.0f - (1.0f - base) * (1.0f - g);
 
     // Hard clip to display white (user requirement).
     if (any(isnan(rgb)) || any(isinf(rgb))) {

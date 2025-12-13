@@ -424,9 +424,15 @@ static PF_Err BlendScreenF(void* refcon, A_long x, A_long y, PF_PixelFloat* inP,
     PF_PixelFloat* g = (PF_PixelFloat*)((char*)bi->glow->data + gy * bi->glow->rowbytes) + gx;
     
     float s = bi->strength;
-    float r = ScreenBlend(inP->red,   g->red   * s);
-    float gg = ScreenBlend(inP->green, g->green * s);
-    float b = ScreenBlend(inP->blue,  g->blue  * s);
+    // User requirement: clamp to display range. Clamp base first to avoid
+    // HDR (inP>1) producing negative results in screen when glow is strong.
+    const float in_r = MIN(1.0f, MAX(0.0f, inP->red));
+    const float in_g = MIN(1.0f, MAX(0.0f, inP->green));
+    const float in_b = MIN(1.0f, MAX(0.0f, inP->blue));
+
+    float r = ScreenBlend(in_r, g->red * s);
+    float gg = ScreenBlend(in_g, g->green * s);
+    float b = ScreenBlend(in_b, g->blue * s);
     // Hard clamp to display white.
     outP->red   = MIN(1.0f, MAX(0.0f, r));
     outP->green = MIN(1.0f, MAX(0.0f, gg));
