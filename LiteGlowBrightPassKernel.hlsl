@@ -67,7 +67,7 @@ void main(uint3 dtid : SV_DispatchThreadID)
     // BGRA: x=B, y=G, z=R, w=A
     const float luma = pixel.z * 0.299f + pixel.y * 0.587f + pixel.x * 0.114f;
 
-    // Soft knee threshold for highlight rolloff.
+    // Soft knee around threshold (avoids banding at the edge).
     const float knee = 0.1f;
     const float t0 = mThreshold - knee;
     const float t1 = mThreshold + knee;

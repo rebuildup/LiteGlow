@@ -31,4 +31,4 @@
 - 生成物に `DirectX_Assets/*.cso` があり、AEXの隣にコピーされている（`output/DirectX_Assets` 等）
 - Strengthを上げた時に「飛び」が出る場合は、まず **シェーダの読み書き型（raw/structured/texture）不一致**を疑う
 - 「白を超える」= 32bpcでは **HDRで1.0超えが出ているだけ**の場合もある。表示白に収めたい場合は、合成後に **ロールオフ（>1の時だけスケール等）**を入れる。
-  - LiteGlowでは `Highlight Rolloff` でON/OFFできる（ONのとき、RGB最大値が1を超えた場合のみスケールして抑制）。
+  - LiteGlowはユーザー要件により、合成後に **RGBを[0,1]へハードクリップ**して表示白に収める（HDRの>1.0は保持しない）。

@@ -9,6 +9,5 @@ typedef enum {
     StrID_Threshold_Param_Name,
     StrID_Quality_Param_Name,
     StrID_Quality_Param_Choices,
-    StrID_Rolloff_Param_Name,
     StrID_NUMTYPES
 } StrIDType;

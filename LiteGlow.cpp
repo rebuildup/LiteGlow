@@ -106,14 +106,6 @@ ParamsSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
         STR(StrID_Quality_Param_Choices),
         QUALITY_DISK_ID);
 
-    AEFX_CLR_STRUCT(def);
-    PF_ADD_CHECKBOX(
-        STR(StrID_Rolloff_Param_Name),
-        "On",
-        TRUE,
-        0,
-        HIGHLIGHT_ROLLOFF_DISK_ID);
-
     out_data->num_params = LITEGLOW_NUM_PARAMS;
     return err;
 }
@@ -378,7 +370,6 @@ typedef struct {
     PF_EffectWorld* glow;
     float strength;
     int factor;
-    int highlight_rolloff;
 } BlendInfo;
 
 static PF_Err BlendScreen8(void* refcon, A_long x, A_long y, PF_Pixel8* inP, PF_Pixel8* outP) {
@@ -436,19 +427,10 @@ static PF_Err BlendScreenF(void* refcon, A_long x, A_long y, PF_PixelFloat* inP,
     float r = ScreenBlend(inP->red,   g->red   * s);
     float gg = ScreenBlend(inP->green, g->green * s);
     float b = ScreenBlend(inP->blue,  g->blue  * s);
-
-    if (bi->highlight_rolloff) {
-        float mx = MAX(r, MAX(gg, b));
-        if (mx > 1.0f) {
-            float inv = 1.0f / mx;
-            r *= inv; gg *= inv; b *= inv;
-        }
-        r = MAX(0.0f, r); gg = MAX(0.0f, gg); b = MAX(0.0f, b);
-    }
-
-    outP->red   = r;
-    outP->green = gg;
-    outP->blue  = b;
+    // Hard clamp to display white.
+    outP->red   = MIN(1.0f, MAX(0.0f, r));
+    outP->green = MIN(1.0f, MAX(0.0f, gg));
+    outP->blue  = MIN(1.0f, MAX(0.0f, b));
     outP->alpha = inP->alpha;
     return PF_Err_NONE;
 }
@@ -462,7 +444,6 @@ typedef struct {
     float radius;
     float threshold;
     int quality;
-    int highlight_rolloff;
 } LiteGlowSettings;
 
 static PF_Err
@@ -572,7 +553,7 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data,
 
     // 3) Screen blend
     if (!err) {
-        BlendInfo bl{ &blur2, strength_norm * 2.0f, ds, settings->highlight_rolloff };
+        BlendInfo bl{ &blur2, strength_norm * 2.0f, ds };
         A_long lines = outputW->height;
         if (pixfmt == PF_PixelFormat_ARGB32)
             ERR(suites.Iterate8Suite2()->iterate(in_data, 0, lines, inputW, NULL, &bl, BlendScreen8, outputW));
@@ -635,8 +616,6 @@ typedef struct {
     unsigned int mHeight;
     float mStrength;
     int mFactor;
-    int mRolloff;
-    int mPadding0;
 } BlendParams;
 
 // =============================================================================
@@ -926,8 +905,6 @@ SmartRenderGPU(PF_InData* in_dataP, PF_OutData* out_dataP,
             params.mHeight = output_worldP->height;
             params.mStrength = strength_norm * 2.0f;
             params.mFactor = ds;
-            params.mRolloff = settings->highlight_rolloff ? 1 : 0;
-            params.mPadding0 = 0;
 
             DXShaderExecution shaderExec(dx_gpu_data->mContext, dx_gpu_data->mBlendShader, 4);
             DX_ERR(shaderExec.SetParamBuffer(&params, sizeof(BlendParams)));
@@ -986,12 +963,11 @@ SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extra
     PF_EffectWorld* input_worldP = nullptr;
     PF_EffectWorld* output_worldP = nullptr;
 
-    PF_ParamDef strength_param, radius_param, threshold_param, quality_param, rolloff_param;
+    PF_ParamDef strength_param, radius_param, threshold_param, quality_param;
     AEFX_CLR_STRUCT(strength_param);
     AEFX_CLR_STRUCT(radius_param);
     AEFX_CLR_STRUCT(threshold_param);
     AEFX_CLR_STRUCT(quality_param);
-    AEFX_CLR_STRUCT(rolloff_param);
 
     ERR(extraP->cb->checkout_layer_pixels(in_data->effect_ref, LITEGLOW_INPUT, &input_worldP));
     ERR(extraP->cb->checkout_output(in_data->effect_ref, &output_worldP));
@@ -1004,8 +980,6 @@ SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extra
                           in_data->time_step, in_data->time_scale, &threshold_param));
     ERR(PF_CHECKOUT_PARAM(in_data, LITEGLOW_QUALITY, in_data->current_time, 
                           in_data->time_step, in_data->time_scale, &quality_param));
-    ERR(PF_CHECKOUT_PARAM(in_data, LITEGLOW_HIGHLIGHT_ROLLOFF, in_data->current_time, 
-                          in_data->time_step, in_data->time_scale, &rolloff_param));
 
     if (!err && input_worldP && output_worldP) {
         LiteGlowSettings settings;
@@ -1013,7 +987,6 @@ SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extra
         settings.radius = radius_param.u.fs_d.value;
         settings.threshold = threshold_param.u.fs_d.value;
         settings.quality = quality_param.u.pd.value;
-        settings.highlight_rolloff = rolloff_param.u.bd.value ? 1 : 0;
 
         if (isGPU) {
             AEFX_SuiteScoper<PF_WorldSuite2> world_suite = AEFX_SuiteScoper<PF_WorldSuite2>(
@@ -1031,7 +1004,6 @@ SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extra
     ERR2(PF_CHECKIN_PARAM(in_data, &radius_param));
     ERR2(PF_CHECKIN_PARAM(in_data, &threshold_param));
     ERR2(PF_CHECKIN_PARAM(in_data, &quality_param));
-    ERR2(PF_CHECKIN_PARAM(in_data, &rolloff_param));
 
     return err;
 }
@@ -1046,7 +1018,6 @@ Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_Layer
     s.radius = params[LITEGLOW_RADIUS]->u.fs_d.value;
     s.threshold = params[LITEGLOW_THRESHOLD]->u.fs_d.value;
     s.quality = params[LITEGLOW_QUALITY]->u.pd.value;
-    s.highlight_rolloff = params[LITEGLOW_HIGHLIGHT_ROLLOFF]->u.bd.value ? 1 : 0;
     return ProcessWorlds(in_data, out_data, &s, inputW, outputW);
 }
 

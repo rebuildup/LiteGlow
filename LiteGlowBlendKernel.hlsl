@@ -12,8 +12,6 @@ cbuffer BlendParams : register(b0)
     uint mHeight;
     float mStrength;
     int mFactor;
-    int mRolloff;
-    int mPadding0;
 };
 
 ByteAddressBuffer inSrc : register(t0);
@@ -78,16 +76,12 @@ void main(uint3 dtid : SV_DispatchThreadID)
     // Screen: 1 - (1-a)(1-b)
     float3 rgb = 1.0f - (1.0f - original.xyz) * (1.0f - g);
 
-    if (mRolloff != 0)
-    {
-        // Keep output within display-white without destroying sub-1.0 values:
-        // If any channel exceeds 1.0, scale RGB down so max becomes 1.0.
-        rgb = max(0.0f, rgb);
-        const float mx = max(rgb.x, max(rgb.y, rgb.z));
-        if (mx > 1.0f) {
-            rgb *= (1.0f / mx);
-        }
+    // Hard clip to display white (user requirement).
+    // Note: clamp also acts as a safety net against out-of-range values at high Strength.
+    if (any(isnan(rgb)) || any(isinf(rgb))) {
+        rgb = 0.0f;
     }
+    rgb = saturate(rgb);
 
     StoreF4(outDst, ByteOffset((uint)mDstPitch, x, y), float4(rgb, original.w));
 }

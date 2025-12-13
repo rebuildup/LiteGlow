@@ -13,8 +13,7 @@ TableString g_strs[StrID_NUMTYPES] = {
     StrID_Radius_Param_Name,         "Radius",
     StrID_Threshold_Param_Name,      "Threshold",
     StrID_Quality_Param_Name,        "Quality",
-    StrID_Quality_Param_Choices,     "Low|Medium|High",
-    StrID_Rolloff_Param_Name,        "Highlight Rolloff"
+    StrID_Quality_Param_Choices,     "Low|Medium|High"
 };
 
 char* GetStringPtr(int strNum)

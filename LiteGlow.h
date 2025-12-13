@@ -63,7 +63,6 @@ enum {
     LITEGLOW_RADIUS,
     LITEGLOW_THRESHOLD,
     LITEGLOW_QUALITY,
-    LITEGLOW_HIGHLIGHT_ROLLOFF,
     LITEGLOW_NUM_PARAMS
 };
 
@@ -71,8 +70,7 @@ enum {
     STRENGTH_DISK_ID = 1,
     RADIUS_DISK_ID,
     THRESHOLD_DISK_ID,
-    QUALITY_DISK_ID,
-    HIGHLIGHT_ROLLOFF_DISK_ID
+    QUALITY_DISK_ID
 };
 
 // Structure definitions for internal processing
