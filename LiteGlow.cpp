@@ -469,7 +469,10 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data,
         return PF_COPY(inputW, outputW, NULL, NULL);
     }
 
-    AEFX_SuiteHelperT<PF_WorldSuite2> worldSuite(in_data, out_data, kPFWorldSuite, kPFWorldSuiteVersion2);
+    PF_WorldSuite2* worldSuite = nullptr;
+    in_data->pica_basicP->AcquireSuite(kPFWorldSuite, kPFWorldSuiteVersion2, (const void**)&worldSuite);
+    if (!worldSuite) return PF_Err_INTERNAL_STRUCT_DAMAGED;
+    
     PF_PixelFormat pixfmt = PF_PixelFormat_INVALID;
     ERR(worldSuite->PF_GetPixelFormat(inputW, &pixfmt));
 
@@ -572,6 +575,8 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data,
     worldSuite->PF_DisposeWorld(in_data->effect_ref, &brightW);
     worldSuite->PF_DisposeWorld(in_data->effect_ref, &blur1);
     worldSuite->PF_DisposeWorld(in_data->effect_ref, &blur2);
+
+    in_data->pica_basicP->ReleaseSuite(kPFWorldSuite, kPFWorldSuiteVersion2);
 
     return err;
 }
