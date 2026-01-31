@@ -9,9 +9,9 @@ cbuffer BlurParams : register(b0)
     int m16f;
     uint mWidth;
     uint mHeight;
-    int mRadius;
-    int mPadding0;
-    int mPadding1;
+    int mRadiusH;  // Horizontal blur radius (may differ from vertical for PAR/field rendering)
+    int mRadiusV;  // Vertical blur radius
+    int mPadding;  // Padding for alignment
 };
 
 ByteAddressBuffer inSrc : register(t0);
@@ -47,7 +47,7 @@ void main(uint3 dtid : SV_DispatchThreadID)
 
     const int x = (int)dtid.x;
     const int y = (int)dtid.y;
-    const int r = max(1, mRadius);
+    const int r = max(1, mRadiusH);  // Use horizontal radius
 
     // 9-tap Gaussian-ish blur with variable step (more stable on text edges).
     const int step = max(1, r / 3);

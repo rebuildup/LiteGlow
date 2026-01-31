@@ -57,12 +57,33 @@
 #define QUALITY_NUM_CHOICES 3
 #define QUALITY_DFLT       QUALITY_MEDIUM
 
+// Blend mode settings
+#define BLEND_MODE_SCREEN    1
+#define BLEND_MODE_ADD       2
+#define BLEND_MODE_NORMAL    3
+#define BLEND_MODE_NUM_CHOICES 3
+#define BLEND_MODE_DFLT      BLEND_MODE_SCREEN
+
+// Bloom intensity settings
+#define BLOOM_INTENSITY_MIN   0
+#define BLOOM_INTENSITY_MAX   400
+#define BLOOM_INTENSITY_DFLT  150  // Represents 1.5x when divided by 100
+
+// Threshold softness (knee) settings
+#define KNEE_MIN   0
+#define KNEE_MAX   100
+#define KNEE_DFLT  10  // Represents 0.1 when divided by 100
+
 enum {
     LITEGLOW_INPUT = 0,
     LITEGLOW_STRENGTH,
     LITEGLOW_RADIUS,
     LITEGLOW_THRESHOLD,
     LITEGLOW_QUALITY,
+    LITEGLOW_BLOOM_INTENSITY,
+    LITEGLOW_KNEE,
+    LITEGLOW_BLEND_MODE,
+    LITEGLOW_TINT_COLOR,
     LITEGLOW_NUM_PARAMS
 };
 
@@ -70,43 +91,12 @@ enum {
     STRENGTH_DISK_ID = 1,
     RADIUS_DISK_ID,
     THRESHOLD_DISK_ID,
-    QUALITY_DISK_ID
+    QUALITY_DISK_ID,
+    BLOOM_INTENSITY_DISK_ID,
+    KNEE_DISK_ID,
+    BLEND_MODE_DISK_ID,
+    TINT_COLOR_DISK_ID
 };
-
-// Structure definitions for internal processing
-typedef struct {
-    A_long sequence_id;
-    int gaussKernelSize;
-    int kernelRadius;
-    int quality;
-    float sigma;
-    float gaussKernel[128];
-} LiteGlowSequenceData;
-
-typedef struct {
-    float strength;
-    float threshold;
-    float resolution_factor;
-    PF_EffectWorld* input;
-} GlowData;
-
-typedef GlowData* GlowDataP;
-
-typedef struct {
-    PF_EffectWorld* input;
-    float* kernel;
-    int radius;
-} BlurData;
-
-typedef BlurData* BlurDataP;
-
-typedef struct {
-    PF_EffectWorld* glow;
-    int quality;
-    float strength;
-} BlendData;
-
-typedef BlendData* BlendDataP;
 
 extern "C" {
     DllExport

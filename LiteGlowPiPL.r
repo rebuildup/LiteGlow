@@ -10,6 +10,19 @@
 	#define AE_OS_MAC 1
 	#include <AE_General.r>
 #endif
+
+// =============================================================================
+// LiteGlow Plugin Information
+// =============================================================================
+// Category: "361do_plugins" - Custom category for 3rd party plugins
+// This groups the plugin under a specific category in After Effects' Effect menu.
+// To change the category, modify the 'Category' field below. Common categories:
+//   - "Generate"     - Generate effects
+//   - "Blur & Sharpen" - Blur and sharpen effects
+//   - "Color Correction" - Color correction effects
+//   - "Stylize"      - Stylize effects
+//   - "Perspective"  - Perspective effects
+// Or use a custom category name (as done here) for vendor-specific grouping.
     
 resource 'PiPL' (16000) {
     {

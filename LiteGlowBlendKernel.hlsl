@@ -12,6 +12,10 @@ cbuffer BlendParams : register(b0)
     uint mHeight;
     float mStrength;
     int mFactor;
+    float mTintR;
+    float mTintG;
+    float mTintB;
+    int mBlendMode;
 };
 
 ByteAddressBuffer inSrc : register(t0);
@@ -80,6 +84,9 @@ void main(uint3 dtid : SV_DispatchThreadID)
     // g' = 1 - exp(-g*s)  (film-like, avoids hard clipping at high Strength)
     float3 g = max(0.0f, glow.xyz * mStrength);
     g = 1.0f - exp(-g);
+
+    // Apply tint color
+    g *= float3(mTintR, mTintG, mTintB);
 
     // User requirement: output must be within display white.
     // Clamp the base layer first, otherwise HDR inputs (original>1) combined with g in (0..1)
