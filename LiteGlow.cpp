@@ -189,7 +189,7 @@ ParamsSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
     // Tint Color: Color for the glow
     AEFX_CLR_STRUCT(def);
     PF_ADD_COLOR(STR(StrID_Tint_Color_Param_Name),
-        0xFFFF, 0xFFFF, 0xFFFF,  // Default to white (no tint)
+        (A_u_short)0xFFFF, (A_u_short)0xFFFF, (A_u_short)0xFFFF,  // Default to white (no tint)
         TINT_COLOR_DISK_ID);
 
     out_data->num_params = LITEGLOW_NUM_PARAMS;
