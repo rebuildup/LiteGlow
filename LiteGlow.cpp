@@ -64,7 +64,7 @@ inline PF_Err DXErrFromHRESULT(HRESULT hr) {
         case HRESULT_FROM_WIN32(ERROR_OUTOFMEMORY):
             return PF_Err_OUT_OF_MEMORY;
         case E_INVALIDARG:
-            return PF_Err_BAD_PARAM;
+            return PF_Err_UNRECOGNIZED_PARAM_TYPE;
         case HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED):
             return PF_Err_UNRECOGNIZED_PARAM_TYPE;
         default:
@@ -695,25 +695,25 @@ typedef struct {
 static PF_Err ValidateSettings(const LiteGlowSettings* settings) {
     if (!settings) return PF_Err_INTERNAL_STRUCT_DAMAGED;
     if (settings->radius < 0.0f || settings->radius > RADIUS_MAX) {
-        return PF_Err_OUT_OF_RANGE;
+        return PF_Err_UNRECOGNIZED_PARAM_TYPE;
     }
     if (settings->strength < 0.0f || settings->strength > STRENGTH_MAX) {
-        return PF_Err_OUT_OF_RANGE;
+        return PF_Err_UNRECOGNIZED_PARAM_TYPE;
     }
     if (settings->threshold < THRESHOLD_MIN || settings->threshold > THRESHOLD_MAX) {
-        return PF_Err_OUT_OF_RANGE;
+        return PF_Err_UNRECOGNIZED_PARAM_TYPE;
     }
     if (settings->quality < 0 || settings->quality >= QUALITY_NUM_CHOICES) {
-        return PF_Err_OUT_OF_RANGE;
+        return PF_Err_UNRECOGNIZED_PARAM_TYPE;
     }
     if (settings->bloomIntensity < BLOOM_INTENSITY_MIN || settings->bloomIntensity > BLOOM_INTENSITY_MAX) {
-        return PF_Err_OUT_OF_RANGE;
+        return PF_Err_UNRECOGNIZED_PARAM_TYPE;
     }
     if (settings->knee < KNEE_MIN || settings->knee > KNEE_MAX) {
-        return PF_Err_OUT_OF_RANGE;
+        return PF_Err_UNRECOGNIZED_PARAM_TYPE;
     }
     if (settings->blendMode < BLEND_MODE_SCREEN || settings->blendMode > BLEND_MODE_NORMAL) {
-        return PF_Err_OUT_OF_RANGE;
+        return PF_Err_UNRECOGNIZED_PARAM_TYPE;
     }
     return PF_Err_NONE;
 }
@@ -747,6 +747,10 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data,
         return PF_COPY(inputW, outputW, NULL, NULL);
     }
 
+    // Declare variables before goto cleanup to avoid skipping initialization
+    int ds = 1, dsW = 1, dsH = 1, ds_radius = 1;
+    int ds_radius_h = 1, ds_radius_v = 1;
+
     AEFX_SuiteScoper<PF_WorldSuite2> worldSuite = AEFX_SuiteScoper<PF_WorldSuite2>(
         in_data, kPFWorldSuite, kPFWorldSuiteVersion2, out_data);
     PF_EffectWorld brightW = {}, blur1 = {}, blur2 = {};
@@ -760,15 +764,14 @@ ProcessWorlds(PF_InData* in_data, PF_OutData* out_data,
     // Downsample for performance: Low=4x, Medium=2x, High=1x
     // Quality to downsample factor mapping (lower quality = higher downsample for performance)
     static const int kQualityToDownsample[] = { 4, 2, 1 };  // Index 0=LOW, 1=MEDIUM, 2=HIGH
-    int ds = kQualityToDownsample[quality];
-    int dsW = MAX(1, outputW->width / ds);
-    int dsH = MAX(1, outputW->height / ds);
+    ds = kQualityToDownsample[quality];
+    dsW = MAX(1, outputW->width / ds);
+    dsH = MAX(1, outputW->height / ds);
     // Clamp ds_radius after adding quality bonus to prevent overflow beyond 24
-    int ds_radius = MAX(1, base_radius / ds + (quality == QUALITY_HIGH ? 2 : 0));
+    ds_radius = MAX(1, base_radius / ds + (quality == QUALITY_HIGH ? 2 : 0));
     ds_radius = MIN(ds_radius, 24);
 
     // Calculate separate horizontal and vertical blur radii based on PAR and field rendering
-    int ds_radius_h, ds_radius_v;
     AdjustBlurRadiusForPARAndField(ds_radius, settings->pixel_aspect_ratio, settings->field, ds_radius_h, ds_radius_v);
     // Clamp adjusted radii to reasonable limits
     ds_radius_h = MIN(ds_radius_h, MAX_ADJUSTED_BLUR_RADIUS);
