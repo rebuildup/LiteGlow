@@ -52,28 +52,6 @@
     #define HAS_HLSL 0
 #endif
 
-#if HAS_HLSL
-inline PF_Err DXErr(bool inSuccess) {
-}
-
-// Better error mapping function for HRESULT
-inline PF_Err DXErrFromHRESULT(HRESULT hr) {
-    if (SUCCEEDED(hr)) return PF_Err_NONE;
-    switch (hr) {
-        case E_OUTOFMEMORY:
-        case HRESULT_FROM_WIN32(ERROR_OUTOFMEMORY):
-            return PF_Err_OUT_OF_MEMORY;
-        case E_INVALIDARG:
-            return PF_Err_UNRECOGNIZED_PARAM_TYPE;
-        case HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED):
-            return PF_Err_UNRECOGNIZED_PARAM_TYPE;
-        default:
-            return PF_Err_INTERNAL_STRUCT_DAMAGED;
-    }
-}
-#define DX_ERR(FUNC) ERR(DXErr(FUNC))
-#endif
-
 // =============================================================================
 // Naming Convention
 // =============================================================================
@@ -980,75 +958,52 @@ GPUDeviceSetup(PF_InData* in_dataP, PF_OutData* out_dataP, PF_GPUDeviceSetupExtr
         dx_gpu_data->mBlendShader = std::make_shared<ShaderObject>();
 
         // Initialize DXContext
-        err = DX_ERR(dx_gpu_data->mContext->Initialize(
+        if (!dx_gpu_data->mContext->Initialize(
             (ID3D12Device*)device_info.devicePV,
-            (ID3D12CommandQueue*)device_info.command_queuePV));
-        if (err != PF_Err_NONE) {
+            (ID3D12CommandQueue*)device_info.command_queuePV)) {
             dx_gpu_data->mContext.reset();
             handle_suite->host_dispose_handle(gpu_dataH);
-            return err;
+            return PF_Err_INTERNAL_STRUCT_DAMAGED;
         }
 
         std::wstring csoPath, sigPath;
 
         // Load BrightPass shader with individual error handling
-        err = GetShaderPath(ShaderNames::BRIGHT_PASS, csoPath, sigPath);
-        if (err == PF_Err_NONE) {
-            err = DX_ERR(dx_gpu_data->mContext->LoadShader(csoPath.c_str(), sigPath.c_str(), dx_gpu_data->mBrightPassShader));
-        }
-        if (err != PF_Err_NONE) {
+        if (!GetShaderPath(L"BrightPass", csoPath, sigPath) ||
+            !dx_gpu_data->mContext->LoadShader(csoPath.c_str(), sigPath.c_str(), dx_gpu_data->mBrightPassShader)) {
             dx_gpu_data->mContext.reset();
-            dx_gpu_data->mBrightPassShader.reset();
-            dx_gpu_data->mBlurHShader.reset();
-            dx_gpu_data->mBlurVShader.reset();
-            dx_gpu_data->mBlendShader.reset();
             handle_suite->host_dispose_handle(gpu_dataH);
-            return err;
+            return PF_Err_INTERNAL_STRUCT_DAMAGED;
         }
 
         // Load BlurH shader
-        err = GetShaderPath(ShaderNames::BLUR_H, csoPath, sigPath);
-        if (err == PF_Err_NONE) {
-            err = DX_ERR(dx_gpu_data->mContext->LoadShader(csoPath.c_str(), sigPath.c_str(), dx_gpu_data->mBlurHShader));
-        }
-        if (err != PF_Err_NONE) {
+        if (!GetShaderPath(L"BlurH", csoPath, sigPath) ||
+            !dx_gpu_data->mContext->LoadShader(csoPath.c_str(), sigPath.c_str(), dx_gpu_data->mBlurHShader)) {
             dx_gpu_data->mContext.reset();
             dx_gpu_data->mBrightPassShader.reset();
-            dx_gpu_data->mBlurHShader.reset();
-            dx_gpu_data->mBlurVShader.reset();
-            dx_gpu_data->mBlendShader.reset();
             handle_suite->host_dispose_handle(gpu_dataH);
-            return err;
+            return PF_Err_INTERNAL_STRUCT_DAMAGED;
         }
 
         // Load BlurV shader
-        err = GetShaderPath(ShaderNames::BLUR_V, csoPath, sigPath);
-        if (err == PF_Err_NONE) {
-            err = DX_ERR(dx_gpu_data->mContext->LoadShader(csoPath.c_str(), sigPath.c_str(), dx_gpu_data->mBlurVShader));
-        }
-        if (err != PF_Err_NONE) {
+        if (!GetShaderPath(L"BlurV", csoPath, sigPath) ||
+            !dx_gpu_data->mContext->LoadShader(csoPath.c_str(), sigPath.c_str(), dx_gpu_data->mBlurVShader)) {
             dx_gpu_data->mContext.reset();
             dx_gpu_data->mBrightPassShader.reset();
             dx_gpu_data->mBlurHShader.reset();
-            dx_gpu_data->mBlurVShader.reset();
-            dx_gpu_data->mBlendShader.reset();
             handle_suite->host_dispose_handle(gpu_dataH);
-            return err;
+            return PF_Err_INTERNAL_STRUCT_DAMAGED;
         }
 
         // Load Blend shader
-        err = GetShaderPath(ShaderNames::BLEND, csoPath, sigPath);
-        if (err == PF_Err_NONE) {
-            err = DX_ERR(dx_gpu_data->mContext->LoadShader(csoPath.c_str(), sigPath.c_str(), dx_gpu_data->mBlendShader));
-        }
-        if (err != PF_Err_NONE) {
+        if (!GetShaderPath(L"Blend", csoPath, sigPath) ||
+            !dx_gpu_data->mContext->LoadShader(csoPath.c_str(), sigPath.c_str(), dx_gpu_data->mBlendShader)) {
             dx_gpu_data->mContext.reset();
             dx_gpu_data->mBrightPassShader.reset();
             dx_gpu_data->mBlurHShader.reset();
             dx_gpu_data->mBlurVShader.reset();
-            dx_gpu_data->mBlendShader.reset();
             handle_suite->host_dispose_handle(gpu_dataH);
-            return err;
+            return PF_Err_INTERNAL_STRUCT_DAMAGED;
         }
 
         extraP->output->gpu_data = gpu_dataH;
@@ -1235,11 +1190,13 @@ SmartRenderGPU(PF_InData* in_dataP, PF_OutData* out_dataP,
             params.mFactor = ds;
 
             DXShaderExecution shaderExec(dx_gpu_data->mContext, dx_gpu_data->mBrightPassShader, 3);
-            DX_ERR(shaderExec.SetParamBuffer(&params, sizeof(BrightPassParams)));
-            DX_ERR(shaderExec.SetUnorderedAccessView((ID3D12Resource*)bright_mem, dsH * brightWorld->rowbytes));
-            DX_ERR(shaderExec.SetShaderResourceView((ID3D12Resource*)src_mem, input_worldP->height * input_worldP->rowbytes));
-            err = DX_ERR(shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16)));
-            if (err) goto cleanup;
+            if (!shaderExec.SetParamBuffer(&params, sizeof(BrightPassParams)) ||
+                !shaderExec.SetUnorderedAccessView((ID3D12Resource*)bright_mem, dsH * brightWorld->rowbytes) ||
+                !shaderExec.SetShaderResourceView((ID3D12Resource*)src_mem, input_worldP->height * input_worldP->rowbytes) ||
+                !shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16))) {
+                err = PF_Err_INTERNAL_STRUCT_DAMAGED;
+                goto cleanup;
+            }
         }
 
         // 2) Blur Pass 1: Horizontal
@@ -1255,11 +1212,13 @@ SmartRenderGPU(PF_InData* in_dataP, PF_OutData* out_dataP,
             params.mPadding = 0;
 
             DXShaderExecution shaderExec(dx_gpu_data->mContext, dx_gpu_data->mBlurHShader, 3);
-            DX_ERR(shaderExec.SetParamBuffer(&params, sizeof(BlurParams)));
-            DX_ERR(shaderExec.SetUnorderedAccessView((ID3D12Resource*)blur1_mem, dsH * blur1World->rowbytes));
-            DX_ERR(shaderExec.SetShaderResourceView((ID3D12Resource*)bright_mem, dsH * brightWorld->rowbytes));
-            err = DX_ERR(shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16)));
-            if (err) goto cleanup;
+            if (!shaderExec.SetParamBuffer(&params, sizeof(BlurParams)) ||
+                !shaderExec.SetUnorderedAccessView((ID3D12Resource*)blur1_mem, dsH * blur1World->rowbytes) ||
+                !shaderExec.SetShaderResourceView((ID3D12Resource*)bright_mem, dsH * brightWorld->rowbytes) ||
+                !shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16))) {
+                err = PF_Err_INTERNAL_STRUCT_DAMAGED;
+                goto cleanup;
+            }
         }
 
         // 3) Blur Pass 2: Vertical
@@ -1275,11 +1234,13 @@ SmartRenderGPU(PF_InData* in_dataP, PF_OutData* out_dataP,
             params.mPadding = 0;
 
             DXShaderExecution shaderExec(dx_gpu_data->mContext, dx_gpu_data->mBlurVShader, 3);
-            DX_ERR(shaderExec.SetParamBuffer(&params, sizeof(BlurParams)));
-            DX_ERR(shaderExec.SetUnorderedAccessView((ID3D12Resource*)blur2_mem, dsH * blur2World->rowbytes));
-            DX_ERR(shaderExec.SetShaderResourceView((ID3D12Resource*)blur1_mem, dsH * blur1World->rowbytes));
-            err = DX_ERR(shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16)));
-            if (err) goto cleanup;
+            if (!shaderExec.SetParamBuffer(&params, sizeof(BlurParams)) ||
+                !shaderExec.SetUnorderedAccessView((ID3D12Resource*)blur2_mem, dsH * blur2World->rowbytes) ||
+                !shaderExec.SetShaderResourceView((ID3D12Resource*)blur1_mem, dsH * blur1World->rowbytes) ||
+                !shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16))) {
+                err = PF_Err_INTERNAL_STRUCT_DAMAGED;
+                goto cleanup;
+            }
         }
 
         if (blur_iterations == 2) {
@@ -1296,11 +1257,13 @@ SmartRenderGPU(PF_InData* in_dataP, PF_OutData* out_dataP,
                 params.mPadding = 0;
 
                 DXShaderExecution shaderExec(dx_gpu_data->mContext, dx_gpu_data->mBlurHShader, 3);
-                DX_ERR(shaderExec.SetParamBuffer(&params, sizeof(BlurParams)));
-                DX_ERR(shaderExec.SetUnorderedAccessView((ID3D12Resource*)blur1_mem, dsH * blur1World->rowbytes));
-                DX_ERR(shaderExec.SetShaderResourceView((ID3D12Resource*)blur2_mem, dsH * blur2World->rowbytes));
-            err = DX_ERR(shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16)));
-            if (err) goto cleanup;
+                if (!shaderExec.SetParamBuffer(&params, sizeof(BlurParams)) ||
+                    !shaderExec.SetUnorderedAccessView((ID3D12Resource*)blur1_mem, dsH * blur1World->rowbytes) ||
+                    !shaderExec.SetShaderResourceView((ID3D12Resource*)blur2_mem, dsH * blur2World->rowbytes) ||
+                    !shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16))) {
+                    err = PF_Err_INTERNAL_STRUCT_DAMAGED;
+                    goto cleanup;
+                }
             }
 
             // 5) Blur Pass 4: Vertical
@@ -1316,11 +1279,13 @@ SmartRenderGPU(PF_InData* in_dataP, PF_OutData* out_dataP,
                 params.mPadding = 0;
 
                 DXShaderExecution shaderExec(dx_gpu_data->mContext, dx_gpu_data->mBlurVShader, 3);
-                DX_ERR(shaderExec.SetParamBuffer(&params, sizeof(BlurParams)));
-                DX_ERR(shaderExec.SetUnorderedAccessView((ID3D12Resource*)blur2_mem, dsH * blur2World->rowbytes));
-                DX_ERR(shaderExec.SetShaderResourceView((ID3D12Resource*)blur1_mem, dsH * blur1World->rowbytes));
-            err = DX_ERR(shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16)));
-            if (err) goto cleanup;
+                if (!shaderExec.SetParamBuffer(&params, sizeof(BlurParams)) ||
+                    !shaderExec.SetUnorderedAccessView((ID3D12Resource*)blur2_mem, dsH * blur2World->rowbytes) ||
+                    !shaderExec.SetShaderResourceView((ID3D12Resource*)blur1_mem, dsH * blur1World->rowbytes) ||
+                    !shaderExec.Execute((UINT)DivideRoundUp(dsW, 16), (UINT)DivideRoundUp(dsH, 16))) {
+                    err = PF_Err_INTERNAL_STRUCT_DAMAGED;
+                    goto cleanup;
+                }
             }
         }
 
@@ -1341,12 +1306,14 @@ SmartRenderGPU(PF_InData* in_dataP, PF_OutData* out_dataP,
             params.mBlendMode = settings->blendMode;
 
             DXShaderExecution shaderExec(dx_gpu_data->mContext, dx_gpu_data->mBlendShader, 4);
-            DX_ERR(shaderExec.SetParamBuffer(&params, sizeof(BlendParams)));
-            DX_ERR(shaderExec.SetUnorderedAccessView((ID3D12Resource*)dst_mem, output_worldP->height * output_worldP->rowbytes));
-            DX_ERR(shaderExec.SetShaderResourceView((ID3D12Resource*)src_mem, input_worldP->height * input_worldP->rowbytes));
-            DX_ERR(shaderExec.SetShaderResourceView((ID3D12Resource*)blur2_mem, dsH * blur2World->rowbytes));
-            err = DX_ERR(shaderExec.Execute((UINT)DivideRoundUp(output_worldP->width, THREAD_GROUP_SIZE_X), (UINT)DivideRoundUp(output_worldP->height, THREAD_GROUP_SIZE_Y)));
-            if (err) goto cleanup;
+            if (!shaderExec.SetParamBuffer(&params, sizeof(BlendParams)) ||
+                !shaderExec.SetUnorderedAccessView((ID3D12Resource*)dst_mem, output_worldP->height * output_worldP->rowbytes) ||
+                !shaderExec.SetShaderResourceView((ID3D12Resource*)src_mem, input_worldP->height * input_worldP->rowbytes) ||
+                !shaderExec.SetShaderResourceView((ID3D12Resource*)blur2_mem, dsH * blur2World->rowbytes) ||
+                !shaderExec.Execute((UINT)DivideRoundUp(output_worldP->width, THREAD_GROUP_SIZE_X), (UINT)DivideRoundUp(output_worldP->height, THREAD_GROUP_SIZE_Y))) {
+                err = PF_Err_INTERNAL_STRUCT_DAMAGED;
+                goto cleanup;
+            }
         }
     }
 
