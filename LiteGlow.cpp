@@ -131,8 +131,7 @@ GlobalSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
         PF_OutFlag2_SUPPORTS_SMART_RENDER |
         PF_OutFlag2_SUPPORTS_THREADED_RENDERING |
         PF_OutFlag2_FLOAT_COLOR_AWARE |
-        PF_OutFlag2_SUPPORTS_GPU_RENDER_F32 |
-        PF_OutFlag2_WIDE_TIME_INPUT;
+        PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
     
 #if HAS_HLSL
     out_data->out_flags2 |= PF_OutFlag2_SUPPORTS_DIRECTX_RENDERING;
@@ -187,7 +186,7 @@ ParamsSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
         BLOOM_INTENSITY_MIN, BLOOM_INTENSITY_MAX,
         BLOOM_INTENSITY_MIN, BLOOM_INTENSITY_MAX,
         BLOOM_INTENSITY_DFLT,
-        PF_Precision_FIXED,
+        PF_Precision_INTEGER,
         0, 0,
         BLOOM_INTENSITY_DISK_ID);
 
@@ -197,7 +196,7 @@ ParamsSetup(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_
         KNEE_MIN, KNEE_MAX,
         KNEE_MIN, KNEE_MAX,
         KNEE_DFLT,
-        PF_Precision_FIXED,
+        PF_Precision_INTEGER,
         0, 0,
         KNEE_DISK_ID);
 
@@ -615,11 +614,11 @@ static PF_Err BlendScreenF(void* refcon, A_long x, A_long y, PF_PixelFloat* inP,
 
     // Apply tint color to glow
     float r = ScreenBlend(in_r, g->red * s * bi->tintR);
-    float g = ScreenBlend(in_g, g->green * s * bi->tintG);
+    float green_result = ScreenBlend(in_g, g->green * s * bi->tintG);
     float b = ScreenBlend(in_b, g->blue * s * bi->tintB);
     // Hard clamp to display white.
     outP->red   = MIN(1.0f, MAX(0.0f, r));
-    outP->green = MIN(1.0f, MAX(0.0f, g));
+    outP->green = MIN(1.0f, MAX(0.0f, green_result));
     outP->blue  = MIN(1.0f, MAX(0.0f, b));
     outP->alpha = inP->alpha;
     return PF_Err_NONE;
@@ -696,25 +695,25 @@ typedef struct {
 static PF_Err ValidateSettings(const LiteGlowSettings* settings) {
     if (!settings) return PF_Err_INTERNAL_STRUCT_DAMAGED;
     if (settings->radius < 0.0f || settings->radius > RADIUS_MAX) {
-        return PF_Err_BAD_PARAM;
+        return PF_Err_OUT_OF_RANGE;
     }
     if (settings->strength < 0.0f || settings->strength > STRENGTH_MAX) {
-        return PF_Err_BAD_PARAM;
+        return PF_Err_OUT_OF_RANGE;
     }
     if (settings->threshold < THRESHOLD_MIN || settings->threshold > THRESHOLD_MAX) {
-        return PF_Err_BAD_PARAM;
+        return PF_Err_OUT_OF_RANGE;
     }
     if (settings->quality < 0 || settings->quality >= QUALITY_NUM_CHOICES) {
-        return PF_Err_BAD_PARAM;
+        return PF_Err_OUT_OF_RANGE;
     }
     if (settings->bloomIntensity < BLOOM_INTENSITY_MIN || settings->bloomIntensity > BLOOM_INTENSITY_MAX) {
-        return PF_Err_BAD_PARAM;
+        return PF_Err_OUT_OF_RANGE;
     }
     if (settings->knee < KNEE_MIN || settings->knee > KNEE_MAX) {
-        return PF_Err_BAD_PARAM;
+        return PF_Err_OUT_OF_RANGE;
     }
     if (settings->blendMode < BLEND_MODE_SCREEN || settings->blendMode > BLEND_MODE_NORMAL) {
-        return PF_Err_BAD_PARAM;
+        return PF_Err_OUT_OF_RANGE;
     }
     return PF_Err_NONE;
 }
