@@ -1407,12 +1407,12 @@ SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extra
 
     if (!err && input_worldP && output_worldP) {
         LiteGlowSettings settings;
-        settings.strength = strength_param.u.fs_d.value;
-        settings.radius = radius_param.u.fs_d.value;
-        settings.threshold = threshold_param.u.fs_d.value;
+        settings.strength = static_cast<float>(strength_param.u.fs_d.value);
+        settings.radius = static_cast<float>(radius_param.u.fs_d.value);
+        settings.threshold = static_cast<float>(threshold_param.u.fs_d.value);
         settings.quality = quality_param.u.pd.value;
-        settings.bloomIntensity = bloom_intensity_param.u.fs_d.value;
-        settings.knee = knee_param.u.fs_d.value;
+        settings.bloomIntensity = static_cast<float>(bloom_intensity_param.u.fs_d.value);
+        settings.knee = static_cast<float>(knee_param.u.fs_d.value);
         settings.blendMode = blend_mode_param.u.pd.value;
         // Convert tint color from 0-65535 to 0-1 range
         settings.tintR = tint_color_param.u.cd.value.red / 65535.0f;
@@ -1453,12 +1453,12 @@ Render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_Layer
     PF_EffectWorld* inputW = &params[LITEGLOW_INPUT]->u.ld;
     PF_EffectWorld* outputW = reinterpret_cast<PF_EffectWorld*>(output);
     LiteGlowSettings s;
-    s.strength = params[LITEGLOW_STRENGTH]->u.fs_d.value;
-    s.radius = params[LITEGLOW_RADIUS]->u.fs_d.value;
-    s.threshold = params[LITEGLOW_THRESHOLD]->u.fs_d.value;
+    s.strength = static_cast<float>(params[LITEGLOW_STRENGTH]->u.fs_d.value);
+    s.radius = static_cast<float>(params[LITEGLOW_RADIUS]->u.fs_d.value);
+    s.threshold = static_cast<float>(params[LITEGLOW_THRESHOLD]->u.fs_d.value);
     s.quality = params[LITEGLOW_QUALITY]->u.pd.value;
-    s.bloomIntensity = params[LITEGLOW_BLOOM_INTENSITY]->u.fs_d.value;
-    s.knee = params[LITEGLOW_KNEE]->u.fs_d.value;
+    s.bloomIntensity = static_cast<float>(params[LITEGLOW_BLOOM_INTENSITY]->u.fs_d.value);
+    s.knee = static_cast<float>(params[LITEGLOW_KNEE]->u.fs_d.value);
     s.blendMode = params[LITEGLOW_BLEND_MODE]->u.pd.value;
     // Convert tint color from 0-65535 to 0-1 range
     s.tintR = params[LITEGLOW_TINT_COLOR]->u.cd.value.red / 65535.0f;
