@@ -363,3 +363,7 @@ MigrationBackup/
 FodyWeavers.xsd
 
 Skeleton/*
+# XcodeGen generated files and local SDK path
+/LiteGlow.xcodeproj/
+/build/
+/.env.local
