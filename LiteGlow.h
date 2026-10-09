@@ -36,7 +36,9 @@
 #define BUG_VERSION          0
 #define STAGE_VERSION        PF_Stage_DEVELOP
 #define BUILD_VERSION        1
-#define LITEGLOW_VERSION_VALUE 528385
+// PF_VERSION(1, 0, 0, PF_Stage_DEVELOP, 1); must stay equal to the literal in
+// LiteGlowPiPL.r, which Rez cannot expand a macro for.
+#define LITEGLOW_VERSION_VALUE 524289
 
 #define STRENGTH_MIN       0
 #define STRENGTH_MAX       2000
