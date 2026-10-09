@@ -1429,7 +1429,16 @@ SmartRender(PF_InData* in_data, PF_OutData* out_data, PF_SmartRenderExtra* extra
             PF_PixelFormat pixel_format = PF_PixelFormat_INVALID;
             ERR(world_suite->PF_GetPixelFormat(input_worldP, &pixel_format));
 
+#if HAS_HLSL
             err = SmartRenderGPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, &settings);
+#else
+            // No GPU framework is advertised on this platform (GPUDeviceSetup
+            // clears out_flags2), so AE should not route here. If it ever does,
+            // render on the CPU rather than returning success while leaving the
+            // output world untouched, which would silently produce a blank frame.
+            (void)pixel_format;
+            err = ProcessWorlds(in_data, out_data, &settings, input_worldP, output_worldP);
+#endif
         } else {
             err = ProcessWorlds(in_data, out_data, &settings, input_worldP, output_worldP);
         }

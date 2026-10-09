@@ -53,7 +53,11 @@ resource 'PiPL' (16000) {
             PF_PLUG_IN_VERSION,
             PF_PLUG_IN_SUBVERS
         },
-        #define LITEGLOW_VERSION_VALUE 528385
+        // PF_VERSION(1, 0, 0, PF_Stage_DEVELOP, 1). The previous literal
+        // 528385 (0x00081001) carries bugfix=2, while the code reports
+        // PF_VERSION(1, 0, 0, PF_Stage_DEVELOP, 1) == 0x00080001, so After
+        // Effects saw a version mismatch.
+        #define LITEGLOW_VERSION_VALUE 524289
         AE_Effect_Version {
             LITEGLOW_VERSION_VALUE
         },
